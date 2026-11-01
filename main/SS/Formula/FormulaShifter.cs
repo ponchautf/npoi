@@ -305,7 +305,7 @@ namespace NPOI.SS.Formula
             if (ptg is Ref3DPxg rpxg)
             {
                 if (rpxg.ExternalWorkbookNumber > 0 ||
-                       !_sheetName.Equals(rpxg.SheetName))
+                       !_sheetName.Equals(rpxg.SheetName, StringComparison.OrdinalIgnoreCase))
                 {
                     // only move 3D refs that refer to the sheet with cells
                     // being moved
@@ -341,7 +341,7 @@ namespace NPOI.SS.Formula
             if (ptg is Area3DPxg apxg)
             {
                 if (apxg.ExternalWorkbookNumber > 0 ||
-                        !_sheetName.Equals(apxg.SheetName))
+                        !_sheetName.Equals(apxg.SheetName, StringComparison.OrdinalIgnoreCase))
                 {
                     // only move 3D refs that refer to the sheet with cells
                     // being moved
@@ -390,7 +390,7 @@ namespace NPOI.SS.Formula
             if (ptg is Ref3DPxg rpxg)
             {
                 if (rpxg.ExternalWorkbookNumber > 0 ||
-                       !_sheetName.Equals(rpxg.SheetName))
+                       !_sheetName.Equals(rpxg.SheetName, StringComparison.OrdinalIgnoreCase))
                 {
                     // only move 3D refs that refer to the sheet with cells
                     // being moved
@@ -426,7 +426,7 @@ namespace NPOI.SS.Formula
             if (ptg is Area3DPxg apxg)
             {
                 if (apxg.ExternalWorkbookNumber > 0 ||
-                        !_sheetName.Equals(apxg.SheetName))
+                        !_sheetName.Equals(apxg.SheetName, StringComparison.OrdinalIgnoreCase))
                 {
                     // only move 3D refs that refer to the sheet with cells
                     // being moved
@@ -1005,13 +1005,19 @@ namespace NPOI.SS.Formula
             int refRow = rptg.Row;
             if (rptg.IsRowRelative)
             {
+                // check new location where the ref is located
                 int destRowIndex = _firstMovedIndex + _amountToMove;
                 if (destRowIndex < 0 || _version.LastRowIndex < destRowIndex)
                 {
                     return CreateDeletedRef(rptg);
                 }
-
-                rptg.Row = refRow + _amountToMove;
+                // check new location where the ref points to
+                int newRowIndex = refRow + _amountToMove;
+                if(newRowIndex < 0 || _version.LastRowIndex < newRowIndex)
+                {
+                    return CreateDeletedRef(rptg);
+                }
+                rptg.Row = newRowIndex;
                 return rptg;
             }
 

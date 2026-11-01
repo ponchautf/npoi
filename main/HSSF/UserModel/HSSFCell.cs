@@ -31,6 +31,7 @@ namespace NPOI.HSSF.UserModel
     using System.Globalization;
     using System.Collections.Generic;
     using NPOI.SS.Formula.Eval;
+    using NPOI.Util;
 
     /// <summary>
     /// High level representation of a cell in a row of a spReadsheet.
@@ -63,6 +64,7 @@ namespace NPOI.HSSF.UserModel
         private HSSFSheet _sheet;
         private CellValueRecordInterface _record;
         private IComment comment;
+        private ICellStyle _cachedStyle;
 
 
         private const string FILE_FORMAT_NAME = "BIFF8";
@@ -100,7 +102,7 @@ namespace NPOI.HSSF.UserModel
                            CellType type)
         {
             HSSFCell.CheckBounds(col);
-            cellType = CellType.Unknown; // Force 'SetCellType' to Create a first Record
+            cellType = CellType._None; // Force 'SetCellType' to Create a first Record
             stringValue = null;
             this.book = book;
             this._sheet = sheet;
@@ -403,7 +405,7 @@ namespace NPOI.HSSF.UserModel
                     throw new InvalidOperationException("Invalid cell type: " + cellType);
             }
             if (cellType != this.cellType &&
-                this.cellType != CellType.Unknown)  // Special Value to indicate an Uninitialized Cell
+                this.cellType != CellType._None)  // Special Value to indicate an Uninitialized Cell
             {
                 _sheet.Sheet.ReplaceValueRecord(_record);
             }
@@ -904,7 +906,7 @@ namespace NPOI.HSSF.UserModel
         /// <summary>
         /// Get the value of the cell as a string - for numeric cells we throw an exception.
         /// For blank cells we return an empty string.
-        /// For formulaCells that are not string Formulas, we return empty String
+        /// For formula cells whose cached result is not a string, we throw an exception.
         /// </summary>
         /// <value>The string cell value.</value>
         public String StringCellValue
@@ -919,7 +921,7 @@ namespace NPOI.HSSF.UserModel
         /// <summary>
         /// Get the value of the cell as a string - for numeric cells we throw an exception.
         /// For blank cells we return an empty string.
-        /// For formulaCells that are not string Formulas, we return empty String
+        /// For formula cells whose cached result is not a string, we throw an exception.
         /// </summary>
         /// <value>The rich string cell value.</value>
         public IRichTextString RichStringCellValue
@@ -1097,6 +1099,28 @@ namespace NPOI.HSSF.UserModel
                 _record.XFIndex = styleIndex;
             }
         }
+
+        public ICellStyle Style
+        {
+            get
+            {
+                if (_cachedStyle == null)
+                {
+                    _cachedStyle = CellStyle;
+                    if (_cachedStyle == null)
+                    {
+                        _cachedStyle = book.CreateCellStyle();
+                    }
+                }
+                return _cachedStyle;
+            }
+            set
+            {
+                _cachedStyle = value;
+                CellStyle = value;
+            }
+        }
+
         /**
  * Applying a user-defined style (UDS) is special. Excel does not directly reference user-defined styles, but
  * instead create a 'proxy' ExtendedFormatRecord referencing the UDS as parent.
@@ -1458,6 +1482,7 @@ namespace NPOI.HSSF.UserModel
         }
 
         [Obsolete("Will be removed at NPOI 2.8, Use CachedFormulaResultType instead.")]
+        [Removal(Version = "4.2")]
         public CellType GetCachedFormulaResultTypeEnum()
         {
             throw new NotImplementedException();

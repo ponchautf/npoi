@@ -105,23 +105,32 @@ namespace TestCases.XWPF.UserModel
         }
 
         [Test]
-        public void TestSetAlignment()
+        public void TestSetGetAlignment()
         {
             //new clean instance of paragraph
-            XWPFDocument doc = new XWPFDocument();
-            XWPFParagraph p = doc.CreateParagraph();
+            using(XWPFDocument doc = new XWPFDocument())
+            {
+                XWPFParagraph p = doc.CreateParagraph();
 
-            ClassicAssert.AreEqual(ParagraphAlignment.LEFT, p.Alignment);
+                ClassicAssert.AreEqual(ParagraphAlignment.LEFT, p.Alignment);
+                ClassicAssert.IsFalse(p.IsAlignmentSet());
 
-            CT_P ctp = p.GetCTP();
-            CT_PPr ppr = ctp.pPr == null ? ctp.AddNewPPr() : ctp.pPr;
+                CT_P ctp = p.GetCTP();
+                CT_PPr ppr = ctp.pPr == null ? ctp.AddNewPPr() : ctp.pPr;
 
-            CT_Jc align = ppr.AddNewJc();
-            align.val = (ST_Jc.center);
-            ClassicAssert.AreEqual(ParagraphAlignment.CENTER, p.Alignment);
+                CT_Jc align = ppr.AddNewJc();
+                align.val = (ST_Jc.center);
+                ClassicAssert.AreEqual(ParagraphAlignment.CENTER, p.Alignment);
+                ClassicAssert.IsTrue(p.IsAlignmentSet());
 
-            p.Alignment = (ParagraphAlignment.BOTH);
-            ClassicAssert.AreEqual((int)ST_Jc.both, (int)ppr.jc.val);
+                p.Alignment = (ParagraphAlignment.BOTH);
+                ClassicAssert.AreEqual((int) ST_Jc.both, (int) ppr.jc.val);
+                ClassicAssert.IsTrue(p.IsAlignmentSet());
+
+                p.Alignment=null;
+                ClassicAssert.AreEqual(ParagraphAlignment.LEFT, p.Alignment);
+                ClassicAssert.IsFalse(p.IsAlignmentSet());
+            }
         }
 
         [Test]
@@ -378,7 +387,7 @@ namespace TestCases.XWPF.UserModel
             // Look in detail at one
             r = p.Runs[4];
             XWPFPicture pict = r.GetEmbeddedPictures()[0];
-            //CT_Picture picture = pict.GetCTPicture();
+            //CT_Picture picture = pict.CTPicture();
             NPOI.OpenXmlFormats.Dml.Picture.CT_Picture picture = pict.GetCTPicture();
             //Assert.Fail("picture.blipFill.blip.embed is missing from wordprocessing CT_Picture.");
             ClassicAssert.AreEqual("rId8", picture.blipFill.blip.embed);
@@ -642,7 +651,25 @@ namespace TestCases.XWPF.UserModel
             String s = str.ToString();
             ClassicAssert.IsFalse(s.Contains("This is another Test"));
         }
-
+        [Test]
+        public void TestSearchText()
+        {
+            using(XWPFDocument doc = new XWPFDocument())
+            {
+                XWPFParagraph paragraph = doc.CreateParagraph();
+                paragraph.CreateRun().SetText("abc");
+                paragraph.CreateRun().SetText("de");
+                paragraph.CreateRun().SetText("f");
+                paragraph.CreateRun().SetText("g");
+                TextSegment result = paragraph.SearchText("cdefg", new PositionInParagraph());
+                ClassicAssert.AreEqual(0, result.BeginRun);
+                ClassicAssert.AreEqual(3, result.EndRun);
+                ClassicAssert.AreEqual(0, result.BeginText);
+                ClassicAssert.AreEqual(0, result.EndText);
+                ClassicAssert.AreEqual(2, result.BeginChar);
+                ClassicAssert.AreEqual(0, result.EndChar);
+            }
+        }
         [Test]
         public void Testpullrequest404()
         {
@@ -899,6 +926,51 @@ namespace TestCases.XWPF.UserModel
 
             doc.Close();
             doc2.Close();
+        }
+        [Test]
+        public void TestGettersWithEmptyParagraphProperties()
+        {
+            using(XWPFDocument doc = XWPFTestDataSamples.OpenSampleDocument("emptyPPr.docx"))
+            {
+                XWPFParagraph p = doc.GetParagraphArray(0);
+
+                ClassicAssert.IsNull(p.GetNumID());
+                ClassicAssert.IsNull(p.GetNumIlvl());
+                ClassicAssert.IsNull(p.GetNumFmt());
+                ClassicAssert.IsNull(p.NumLevelText);
+                ClassicAssert.IsNull(p.GetNumStartOverride());
+                ClassicAssert.IsFalse(p.IsKeepNext);
+
+                ClassicAssert.IsFalse(p.IsAlignmentSet());
+                ClassicAssert.AreEqual(ParagraphAlignment.LEFT, p.Alignment);
+                ClassicAssert.AreEqual(TextAlignment.AUTO, p.VerticalAlignment);
+
+                ClassicAssert.AreEqual(Borders.None, p.BorderTop);
+                ClassicAssert.AreEqual(Borders.None, p.BorderBottom);
+                ClassicAssert.AreEqual(Borders.None, p.BorderLeft);
+                ClassicAssert.AreEqual(Borders.None, p.BorderRight);
+                ClassicAssert.AreEqual(Borders.None, p.BorderBetween);
+
+                ClassicAssert.AreEqual(-1, p.SpacingAfter);
+                ClassicAssert.AreEqual(-1, p.SpacingAfterLines);
+                ClassicAssert.AreEqual(-1, p.SpacingBefore);
+                ClassicAssert.AreEqual(-1, p.SpacingBeforeLines);
+                ClassicAssert.AreEqual(-1, p.SpacingBetween);
+                ClassicAssert.AreEqual(LineSpacingRule.AUTO, p.SpacingLineRule);
+
+                ClassicAssert.AreEqual(-1, p.IndentationLeft);
+                ClassicAssert.AreEqual(-1, p.IndentationLeftChars);
+                ClassicAssert.AreEqual(-1, p.IndentationRight);
+                ClassicAssert.AreEqual(-1, p.IndentationRightChars);
+                ClassicAssert.AreEqual(-1, p.IndentationHanging);
+                ClassicAssert.AreEqual(-1, p.IndentationFirstLine);
+
+                ClassicAssert.IsFalse(p.IsPageBreak);
+                ClassicAssert.IsFalse(p.IsWordWrapped);
+
+                ClassicAssert.IsNull(p.StyleID);
+                ClassicAssert.IsNull(p.Style);
+            }
         }
     }
 }

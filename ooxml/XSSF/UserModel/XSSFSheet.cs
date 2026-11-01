@@ -15,7 +15,6 @@
    limitations under the License.
 ==================================================================== */
 
-using NPOI.HSSF.Util;
 using NPOI.OpenXml4Net.Exceptions;
 using NPOI.OpenXml4Net.OPC;
 using NPOI.OpenXmlFormats.Dml.Spreadsheet;
@@ -28,19 +27,19 @@ using NPOI.SS.Util;
 using NPOI.Util;
 using NPOI.XSSF.Model;
 using NPOI.XSSF.UserModel.Helpers;
-using SixLabors.Fonts;
+using SkiaSharp;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using Cysharp.Text;
 using System.Xml;
 using CT_Shape = NPOI.OpenXmlFormats.Vml.CT_Shape;
 using ST_EditAs = NPOI.OpenXmlFormats.Dml.Spreadsheet.ST_EditAs;
 using System.Xml.Linq;
 using System.Diagnostics;
+using System.Data;
 
 namespace NPOI.XSSF.UserModel
 {
@@ -64,6 +63,8 @@ namespace NPOI.XSSF.UserModel
         private static readonly double DEFAULT_MARGIN_RIGHT = 0.7;
         public static int TWIPS_PER_POINT = 20;
 
+        internal static bool EnableLazyLoading { get; set; } = true;
+
         //TODO make the two variable below private!
         internal CT_Sheet sheet;
         internal CT_Worksheet worksheet;
@@ -85,6 +86,10 @@ namespace NPOI.XSSF.UserModel
         private List<CellRangeAddress> arrayFormulas;
         private readonly XSSFDataValidationHelper dataValidationHelper;
         private XSSFDrawing drawing = null;
+        private volatile bool _worksheetLoaded = false;
+        private readonly object _loadLock = new object();
+        internal int _parseCount = 0;
+        private List<CellRangeAddress> _cachedMergedRegions;
 
         private CT_Pane Pane
         {
@@ -135,6 +140,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 if(!worksheet.IsSetColBreaks() || worksheet.colBreaks.sizeOfBrkArray() == 0)
                 {
                     return [];
@@ -161,11 +167,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetFormatPr pr = worksheet.sheetFormatPr;
                 return (pr == null || pr.defaultColWidth == 0.0) ? 8.43 : pr.defaultColWidth;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 var pr = GetSheetTypeSheetFormatPr();
                 pr.defaultColWidth = value;
                 pr.baseColWidth = 0;
@@ -196,11 +204,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetFormatPr pr = worksheet.sheetFormatPr;
                 return (float) (pr == null ? 0 : pr.defaultRowHeight);
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_SheetFormatPr pr = GetSheetTypeSheetFormatPr();
                 pr.defaultRowHeight = value;
                 pr.customHeight = true;
@@ -214,11 +224,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetView view = GetDefaultSheetView();
                 return view != null && view.rightToLeft;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_SheetView view = GetDefaultSheetView();
                 view.rightToLeft = value;
             }
@@ -231,12 +243,14 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr sheetPr = GetSheetTypeSheetPr();
                 CT_OutlinePr outlinePr = sheetPr.outlinePr ?? new CT_OutlinePr();
                 return outlinePr.showOutlineSymbols;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr sheetPr = GetSheetTypeSheetPr();
                 CT_OutlinePr outlinePr = sheetPr.outlinePr ?? sheetPr.AddNewOutlinePr();
                 outlinePr.showOutlineSymbols = value;
@@ -252,11 +266,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetView view = GetDefaultSheetView();
                 return view == null || view.showZeros;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_SheetView view = GetSheetTypeSheetView();
                 view.showZeros = value;
             }
@@ -269,6 +285,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 if(_rows.Count == 0)
                 {
                     return 0;
@@ -292,6 +309,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 if(_columns.Count == 0)
                 {
                     return 0;
@@ -315,6 +333,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr sheetPr = GetSheetTypeSheetPr();
                 CT_PageSetUpPr psSetup = (sheetPr == null || !sheetPr.IsSetPageSetUpPr())
                     ? new CT_PageSetUpPr()
@@ -323,6 +342,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
+                EnsureWorksheetLoaded();
                 GetSheetTypePageSetUpPr().fitToPage = value;
             }
         }
@@ -336,6 +356,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 // The default footer is an odd footer
                 return OddFooter;
             }
@@ -350,6 +371,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 // The default header is an odd header
                 return OddHeader;
             }
@@ -363,6 +385,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFOddFooter(GetSheetTypeHeaderFooter());
             }
         }
@@ -375,6 +398,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFEvenFooter(GetSheetTypeHeaderFooter());
             }
         }
@@ -387,6 +411,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFFirstFooter(GetSheetTypeHeaderFooter());
             }
         }
@@ -399,6 +424,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFOddHeader(GetSheetTypeHeaderFooter());
             }
         }
@@ -411,6 +437,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFEvenHeader(GetSheetTypeHeaderFooter());
             }
         }
@@ -423,6 +450,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFFirstHeader(GetSheetTypeHeaderFooter());
             }
         }
@@ -435,11 +463,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.printOptions;
                 return opts != null && opts.horizontalCentered;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.IsSetPrintOptions()
                     ? worksheet.printOptions
                     : worksheet.AddNewPrintOptions();
@@ -452,6 +482,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return _rows.Count == 0 ? 0 : XSSFSheet.GetLastKey(_rows.Keys);
             }
         }
@@ -460,6 +491,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return _columns.Count == 0 ? 0 : XSSFSheet.GetLastKey(_columns.Keys);
             }
         }
@@ -472,20 +504,24 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
-                List<CellRangeAddress> addresses = new List<CellRangeAddress>();
-                CT_MergeCells ctMergeCells = worksheet.mergeCells;
-                if(ctMergeCells == null)
+                EnsureWorksheetLoaded();
+                if(_cachedMergedRegions == null)
                 {
-                    return addresses;
+                    var addresses = new List<CellRangeAddress>();
+                    CT_MergeCells ctMergeCells = worksheet.mergeCells;
+                    if(ctMergeCells != null)
+                    {
+                        foreach(CT_MergeCell ctMergeCell in ctMergeCells.mergeCell)
+                        {
+                            string ref1 = ctMergeCell.@ref;
+                            addresses.Add(CellRangeAddress.ValueOf(ref1));
+                        }
+                    }
+
+                    _cachedMergedRegions = addresses;
                 }
 
-                foreach(CT_MergeCell ctMergeCell in ctMergeCells.mergeCell)
-                {
-                    string ref1 = ctMergeCell.@ref;
-                    addresses.Add(CellRangeAddress.ValueOf(ref1));
-                }
-
-                return addresses;
+                return new List<CellRangeAddress>(_cachedMergedRegions);
             }
         }
 
@@ -496,6 +532,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_MergeCells ctMergeCells = worksheet.mergeCells;
                 return ctMergeCells != null
                     ? ctMergeCells.sizeOfMergeCellArray()
@@ -507,6 +544,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return hyperlinks.Count;
             }
         }
@@ -519,6 +557,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_Pane pane = GetDefaultSheetView().pane;
                 // no pane configured
                 if(pane == null)
@@ -548,6 +587,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return _rows.Count;
             }
         }
@@ -560,6 +600,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return _columns.Count;
             }
         }
@@ -571,6 +612,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFPrintSetup(worksheet);
             }
         }
@@ -582,6 +624,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked;
             }
         }
@@ -596,6 +639,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 if(!worksheet.IsSetRowBreaks() || worksheet.rowBreaks.sizeOfBrkArray() == 0)
                 {
                     return [];
@@ -625,6 +669,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr sheetPr = worksheet.sheetPr;
                 CT_OutlinePr outlinePr = (sheetPr != null && sheetPr.IsSetOutlinePr())
                     ? sheetPr.outlinePr
@@ -633,6 +678,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
+                EnsureWorksheetLoaded();
                 EnsureOutlinePr().summaryBelow = value;
             }
         }
@@ -648,6 +694,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr sheetPr = worksheet.sheetPr;
                 CT_OutlinePr outlinePr = (sheetPr != null && sheetPr.IsSetOutlinePr())
                     ? sheetPr.outlinePr
@@ -656,6 +703,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
+                EnsureWorksheetLoaded();
                 EnsureOutlinePr().summaryRight = value;
             }
         }
@@ -668,6 +716,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return worksheet.IsSetSheetProtection()
                        && worksheet.sheetProtection.scenarios;
             }
@@ -677,6 +726,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 string cellRef = GetPane().topLeftCell;
                 if(cellRef == null)
                 {
@@ -700,6 +750,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 string cellRef = GetSheetTypeSheetView().topLeftCell;
                 if(cellRef == null)
                 {
@@ -711,6 +762,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
+                EnsureWorksheetLoaded();
                 GetSheetTypeSheetView().topLeftCell = "A" + value.ToString();
             }
         }
@@ -723,11 +775,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.printOptions;
                 return opts != null && opts.verticalCentered;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.IsSetPrintOptions()
                     ? worksheet.printOptions
                     : worksheet.AddNewPrintOptions();
@@ -743,10 +797,12 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return GetSheetTypeSheetView().showFormulas;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 GetSheetTypeSheetView().showFormulas = value;
             }
         }
@@ -759,10 +815,12 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return GetSheetTypeSheetView().showGridLines;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 GetSheetTypeSheetView().showGridLines = value;
             }
         }
@@ -777,10 +835,12 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return GetSheetTypeSheetView().showRowColHeaders;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 GetSheetTypeSheetView().showRowColHeaders = value;
             }
         }
@@ -792,11 +852,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.printOptions;
                 return opts != null && opts.gridLines;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.IsSetPrintOptions()
                     ? worksheet.printOptions
                     : worksheet.AddNewPrintOptions();
@@ -811,11 +873,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.printOptions;
                 return opts != null && opts.headings;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_PrintOptions opts = worksheet.IsSetPrintOptions()
                     ? worksheet.printOptions
                     : worksheet.AddNewPrintOptions();
@@ -831,6 +895,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 if(worksheet.IsSetSheetCalcPr())
                 {
                     CT_SheetCalcPr calc = worksheet.sheetCalcPr;
@@ -841,6 +906,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_CalcPr calcPr = (Workbook as XSSFWorkbook).GetCTWorkbook().calcPr;
                 if(worksheet.IsSetSheetCalcPr())
                 {
@@ -870,6 +936,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr sheetPr = GetSheetTypeSheetPr();
                 CT_PageSetUpPr psSetup = (sheetPr == null || !sheetPr.IsSetPageSetUpPr())
                     ? new CT_PageSetUpPr()
@@ -878,6 +945,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr sheetPr = GetSheetTypeSheetPr();
                 CT_PageSetUpPr psSetup = sheetPr.IsSetPageSetUpPr()
                     ? sheetPr.pageSetUpPr
@@ -900,11 +968,13 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetView view = GetDefaultSheetView();
                 return view != null && view.tabSelected;
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_SheetViews views = GetSheetTypeSheetViews();
                 foreach(CT_SheetView view in views.sheetView)
                 {
@@ -920,6 +990,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 string address = GetSheetTypeSelection().activeCell;
                 if(address == null)
                 {
@@ -930,6 +1001,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
+                EnsureWorksheetLoaded();
                 string ref1 = value.FormatAsString();
                 CT_Selection ctsel = GetSheetTypeSelection();
                 ctsel.activeCell = ref1;
@@ -945,6 +1017,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 if(sheetComments == null)
                 {
                     return false;
@@ -954,10 +1027,11 @@ namespace NPOI.XSSF.UserModel
             }
         }
 
-        internal int NumberOfComments
+        public int NumberOfComments
         {
             get
             {
+                EnsureWorksheetLoaded();
                 if(sheetComments == null)
                 {
                     return 0;
@@ -974,6 +1048,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().autoFilter;
             }
         }
@@ -985,6 +1060,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().deleteColumns;
             }
         }
@@ -996,6 +1072,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().deleteRows;
             }
         }
@@ -1007,6 +1084,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().formatCells;
             }
         }
@@ -1018,6 +1096,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().formatColumns;
             }
         }
@@ -1029,6 +1108,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().formatRows;
             }
         }
@@ -1040,6 +1120,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().insertColumns;
             }
         }
@@ -1051,6 +1132,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().insertHyperlinks;
             }
         }
@@ -1062,6 +1144,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().insertRows;
             }
         }
@@ -1073,6 +1156,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().pivotTables;
             }
         }
@@ -1084,6 +1168,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().sort;
             }
         }
@@ -1095,6 +1180,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().objects;
             }
         }
@@ -1106,6 +1192,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().scenarios;
             }
         }
@@ -1118,6 +1205,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().selectLockedCells;
             }
         }
@@ -1130,6 +1218,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return IsSheetLocked && SafeGetProtectionField().selectUnlockedCells;
             }
         }
@@ -1141,6 +1230,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return worksheet.IsSetSheetProtection() && SafeGetProtectionField().sheet;
             }
         }
@@ -1151,14 +1241,16 @@ namespace NPOI.XSSF.UserModel
         /// <param name="t">table to remove</param>
         public void RemoveTable(XSSFTable t)
         {
+            EnsureWorksheetLoaded();
             long id = t.GetCTTable().id;
             KeyValuePair<String, XSSFTable>? toDelete = null;
-        
-            foreach (KeyValuePair<String, XSSFTable> entry in tables) {
-                if (entry.Value.GetCTTable().id == id) 
+
+            foreach(KeyValuePair<String, XSSFTable> entry in tables)
+            {
+                if(entry.Value.GetCTTable().id == id)
                     toDelete = entry;
             }
-            if (toDelete != null)
+            if(toDelete != null)
             {
                 RemoveRelation(GetRelationById(toDelete.Value.Key), true);
                 tables.Remove(toDelete.Value.Key);
@@ -1170,6 +1262,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return new XSSFSheetConditionalFormatting(this);
             }
         }
@@ -1182,6 +1275,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr pr = worksheet.sheetPr;
                 if(pr == null)
                 {
@@ -1193,10 +1287,11 @@ namespace NPOI.XSSF.UserModel
                     return null;
                 }
 
-                return new XSSFColor(pr.tabColor, (Workbook as XSSFWorkbook).GetStylesSource().IndexedColors);
+                return XSSFColor.From(pr.tabColor, (Workbook as XSSFWorkbook).GetStylesSource().IndexedColors);
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CT_SheetPr pr = worksheet.sheetPr;
                 if(pr == null)
                 {
@@ -1211,10 +1306,12 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return GetRepeatingRowsOrColums(true);
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CellRangeAddress columnRangeRef = RepeatingColumns;
                 SetRepeatingRowsAndColumns(value, columnRangeRef);
             }
@@ -1224,10 +1321,12 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
+                EnsureWorksheetLoaded();
                 return GetRepeatingRowsOrColums(false);
             }
             set
             {
+                EnsureWorksheetLoaded();
                 CellRangeAddress rowRangeRef = RepeatingRows;
                 SetRepeatingRowsAndColumns(rowRangeRef, value);
             }
@@ -1278,13 +1377,31 @@ namespace NPOI.XSSF.UserModel
         /// <exception cref="POIXMLException"></exception>
         internal override void OnDocumentRead()
         {
-            try
+            if(!EnableLazyLoading)
             {
-                Read(GetPackagePart().GetInputStream());
+                try
+                {
+                    Read(GetPackagePart().GetInputStream());
+                    _parseCount++;
+                    _worksheetLoaded=true;
+                }
+                catch(IOException e)
+                {
+                    throw new POIXMLException(e);
+                }
             }
-            catch(IOException e)
+            else
             {
-                throw new POIXMLException(e);
+                // Lazy loading: worksheet XML is not parsed here; deferred to first content access.
+                // However, pivot table relationships are registered immediately because workbook
+                // pivot table indexing relies on them being present at open time.
+                foreach(RelationPart rp in RelationParts)
+                {
+                    if(rp.DocumentPart is XSSFPivotTable pivotTable)
+                    {
+                        GetWorkbook().PivotTables.Add(pivotTable);
+                    }
+                }
             }
         }
 
@@ -1320,7 +1437,10 @@ namespace NPOI.XSSF.UserModel
 
                 if(p is XSSFPivotTable pivotTable)
                 {
-                    GetWorkbook().PivotTables.Add(pivotTable);
+                    if(!GetWorkbook().PivotTables.Contains(pivotTable))
+                    {
+                        GetWorkbook().PivotTables.Add(pivotTable);
+                    }
                 }
             }
 
@@ -1338,13 +1458,41 @@ namespace NPOI.XSSF.UserModel
             InitColumns(worksheet);
             columnHelper = new ColumnHelper(worksheet);
             hyperlinks = new List<XSSFHyperlink>();
+            _worksheetLoaded = true;
+        }
+
+        internal void EnsureWorksheetLoaded()
+        {
+            if (_worksheetLoaded) return;
+            lock (_loadLock)
+            {
+                if (_worksheetLoaded) return;
+                // Set _worksheetLoaded = true before calling Read() to prevent infinite
+                // recursion: code paths inside Read() (e.g. XSSFRow/XSSFCell construction)
+                // may call sheet properties that trigger EnsureWorksheetLoaded again.
+                // On failure, reset the flag so callers can retry.
+                _worksheetLoaded = true;
+                bool success = false;
+                try
+                {
+                    Read(GetPackagePart().GetInputStream());
+                    _parseCount++;
+                    success = true;
+                }
+                catch (IOException e)
+                {
+                    throw new POIXMLException(e);
+                }
+                finally
+                {
+                    if (!success) _worksheetLoaded = false;
+                }
+            }
         }
 
         /// <summary>
         /// Get VML drawing for this sheet (aka 'legacy' drawig)
         /// </summary>
-        /// <param name="autoCreate">if true, then a new VML drawing part
-        /// is Created</param>
         /// <returns>the VML drawing of null if the drawing was not found and
         /// autoCreate=false</returns>
         internal XSSFVMLDrawing GetVMLDrawing(bool autoCreate)
@@ -1411,6 +1559,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         protected internal CommentsTable GetCommentsTable(bool create)
         {
+            EnsureWorksheetLoaded();
             if(sheetComments == null && create)
             {
                 // Try to create a comments table with the same number as the
@@ -1441,11 +1590,13 @@ namespace NPOI.XSSF.UserModel
         /// <code>null</code> if not found</returns>
         internal CT_CellFormula GetSharedFormula(int sid)
         {
+            EnsureWorksheetLoaded();
             return sharedFormulas[sid];
         }
 
         internal void OnReadCell(XSSFCell cell)
         {
+            EnsureWorksheetLoaded();
             //collect cells holding shared formulas
             CT_Cell ct = cell.GetCTCell();
             CT_CellFormula f = ct.f;
@@ -1481,8 +1632,22 @@ namespace NPOI.XSSF.UserModel
             }
         }
 
+        protected internal override void PrepareForCommit()
+        {
+            if (_worksheetLoaded)
+            {
+                base.PrepareForCommit();
+            }
+            // If not loaded, preserve the original package part data
+        }
+
         protected internal override void Commit()
         {
+            if (!_worksheetLoaded)
+            {
+                // Sheet was never accessed; original XML is still in the package part
+                return;
+            }
             PackagePart part = GetPackagePart();
             Stream out1 = part.GetOutputStream();
             Write(out1);
@@ -1491,16 +1656,19 @@ namespace NPOI.XSSF.UserModel
 
         protected virtual OpenXmlFormats.Spreadsheet.CT_Drawing GetCTDrawing()
         {
+            EnsureWorksheetLoaded();
             return worksheet.drawing;
         }
 
         protected virtual OpenXmlFormats.Spreadsheet.CT_LegacyDrawing GetCTLegacyDrawing()
         {
+            EnsureWorksheetLoaded();
             return worksheet.legacyDrawing;
         }
 
         internal virtual void Write(Stream stream, bool leaveOpen = false)
         {
+            EnsureWorksheetLoaded();
             bool setToNull = false;
             if(worksheet.sizeOfColsArray() == 1)
             {
@@ -1557,10 +1725,6 @@ namespace NPOI.XSSF.UserModel
                     //worksheet.getHyperlinks().setHyperlinkArray([]);
                     worksheet.UnsetHyperlinks();
                 }
-                else
-                {
-                    // nothing to do
-                }
             }
 
             foreach(XSSFRow row in _rows.Values)
@@ -1582,7 +1746,7 @@ namespace NPOI.XSSF.UserModel
 
                 if(row.LastCellNum != -1)
                 {
-                    maxCell = Math.Max(maxCell, row.LastCellNum);
+                    maxCell = Math.Max(maxCell, row.LastCellNum - 1);
                 }
             }
 
@@ -1616,6 +1780,7 @@ namespace NPOI.XSSF.UserModel
 
         internal bool IsCellInArrayFormulaContext(XSSFCell cell)
         {
+            EnsureWorksheetLoaded();
             foreach(CellRangeAddress range in arrayFormulas)
             {
                 if(range.IsInRange(cell.RowIndex, cell.ColumnIndex))
@@ -1629,6 +1794,7 @@ namespace NPOI.XSSF.UserModel
 
         internal XSSFCell GetFirstCellInArrayFormula(XSSFCell cell)
         {
+            EnsureWorksheetLoaded();
             foreach(CellRangeAddress range in arrayFormulas)
             {
                 if(range.IsInRange(cell.RowIndex, cell.ColumnIndex))
@@ -1649,6 +1815,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="evalWb">in use, if one exists</param>
         internal void OnDeleteFormula(XSSFCell cell, XSSFEvaluationWorkbook evalWb)
         {
+            EnsureWorksheetLoaded();
 
             CT_CellFormula f = cell.GetCTCell().f;
             if(f != null
@@ -1701,6 +1868,7 @@ namespace NPOI.XSSF.UserModel
 
         IEnumerator<IRow> IEnumerable<IRow>.GetEnumerator()
         {
+            EnsureWorksheetLoaded();
             return _rows.Values.GetEnumerator();
         }
 
@@ -1714,11 +1882,13 @@ namespace NPOI.XSSF.UserModel
         /// <returns>the CT_Worksheet bean holding this sheet's data</returns>
         public CT_Worksheet GetCTWorksheet()
         {
+            EnsureWorksheetLoaded();
             return worksheet;
         }
 
         public ColumnHelper GetColumnHelper()
         {
+            EnsureWorksheetLoaded();
             columnHelper = columnHelper ?? new ColumnHelper(worksheet);
             return columnHelper;
         }
@@ -1735,6 +1905,7 @@ namespace NPOI.XSSF.UserModel
         /// this sheet</exception>
         public int AddMergedRegion(CellRangeAddress region)
         {
+            EnsureWorksheetLoaded();
             return AddMergedRegion(region, true);
         }
 
@@ -1750,6 +1921,7 @@ namespace NPOI.XSSF.UserModel
         /// than 2 cells</exception>
         public int AddMergedRegionUnsafe(CellRangeAddress region)
         {
+            EnsureWorksheetLoaded();
             return AddMergedRegion(region, false);
         }
 
@@ -1760,6 +1932,7 @@ namespace NPOI.XSSF.UserModel
         /// </summary>
         public void ValidateMergedRegions()
         {
+            EnsureWorksheetLoaded();
             CheckForMergedRegionsIntersectingArrayFormulas();
             CheckForIntersectingMergedRegions();
         }
@@ -1773,21 +1946,32 @@ namespace NPOI.XSSF.UserModel
         /// <param name="column">the column index</param>
         public void AutoSizeColumn(int column)
         {
+            EnsureWorksheetLoaded();
             AutoSizeColumn(column, false);
+        }
+
+        /// <inheritdoc />
+        public void AutoSizeColumn(int column, int maxRows)
+        {
+            EnsureWorksheetLoaded();
+            AutoSizeColumn(column, false, maxRows);
         }
 
         /// <summary>
         /// Adjusts the column width to fit the contents.
-        /// This process can be relatively slow on large sheets, so this should
+        /// This Process can be relatively slow on large sheets, so this should
         /// normally only be called once per column, at the end of your
         /// Processing.
+        /// You can specify whether the content of merged cells should be considered or ignored.
+        /// Default is to ignore merged cells.
         /// </summary>
         /// <param name="column">the column index</param>
-        /// <param name="useMergedCells">whether to use the contents of merged cells
-        /// when calculating the width of the column</param>
-        public void AutoSizeColumn(int column, bool useMergedCells)
+        /// <param name="useMergedCells">whether to use the contents of merged cells when calculating the width of the column</param>
+        /// <param name="maxRows">limit the scope to maxRows rows to speed up the function, or leave 0 (optional)</param>
+        public void AutoSizeColumn(int column, bool useMergedCells, int maxRows = 0)
         {
-            double width = SheetUtil.GetColumnWidth(this, column, useMergedCells);
+            EnsureWorksheetLoaded();
+            double width = SheetUtil.GetColumnWidth(this, column, useMergedCells, maxRows);
 
             if(width != -1)
             {
@@ -1799,7 +1983,11 @@ namespace NPOI.XSSF.UserModel
                     width = maxColumnWidth;
                 }
                 SetColumnWidth(column, width);
-                GetColumnHelper().SetColBestFit(column, true);
+                IColumn col = GetColumn(column);
+                if(col != null)
+                {
+                    col.IsBestFit = true;
+                }
             }
         }
 
@@ -1812,6 +2000,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="row">the row index</param>
         public void AutoSizeRow(int row)
         {
+            EnsureWorksheetLoaded();
             AutoSizeRow(row, false);
         }
 
@@ -1827,6 +2016,7 @@ namespace NPOI.XSSF.UserModel
         /// cells when  calculating the height of the row</param>
         public void AutoSizeRow(int row, bool useMergedCells)
         {
+            EnsureWorksheetLoaded();
             IRow targetRow = GetRow(row) ?? CreateRow(row);
 
             double height = SheetUtil.GetRowHeight(this, row, useMergedCells);
@@ -1923,6 +2113,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="rowSplit">Vertical position of split.</param>
         public void CreateFreezePane(int colSplit, int rowSplit)
         {
+            EnsureWorksheetLoaded();
             CreateFreezePane(colSplit, rowSplit, colSplit, rowSplit);
         }
 
@@ -1937,6 +2128,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="topRow">Top row visible in bottom pane</param>
         public void CreateFreezePane(int colSplit, int rowSplit, int leftmostColumn, int topRow)
         {
+            EnsureWorksheetLoaded();
             CT_SheetView ctView = GetDefaultSheetView();
 
             // If both colSplit and rowSplit are zero then the existing freeze pane is Removed
@@ -2015,6 +2207,7 @@ namespace NPOI.XSSF.UserModel
         /// row in the sheet</returns>
         public virtual IRow CreateRow(int rownum)
         {
+            EnsureWorksheetLoaded();
             CT_Row ctRow;
             XSSFRow prev = _rows.TryGetValue(rownum, out XSSFRow row) ? row : null;
             if (prev != null)
@@ -2063,6 +2256,7 @@ namespace NPOI.XSSF.UserModel
         /// column in the sheet</returns>
         public virtual IColumn CreateColumn(int columnnum)
         {
+            EnsureWorksheetLoaded();
             CT_Col ctCol;
             XSSFColumn prev = _columns.TryGetValue(columnnum, out XSSFColumn column) ? column : null;
             if (prev != null)
@@ -2126,6 +2320,7 @@ namespace NPOI.XSSF.UserModel
         public void CreateSplitPane(int xSplitPos, int ySplitPos, int leftmostColumn, int topRow,
             PanePosition activePane)
         {
+            EnsureWorksheetLoaded();
             CreateFreezePane(xSplitPos, ySplitPos, leftmostColumn, topRow);
             GetPane().state = ST_PaneState.split;
             GetPane().activePane = (ST_Pane) activePane;
@@ -2138,6 +2333,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns>return cell comment or null if not found</returns>
         public IComment GetCellComment(CellAddress address)
         {
+            EnsureWorksheetLoaded();
             if(sheetComments == null)
             {
                 return null;
@@ -2165,6 +2361,7 @@ namespace NPOI.XSSF.UserModel
         /// the cell address where the comment is located.</returns>
         public Dictionary<CellAddress, IComment> GetCellComments()
         {
+            EnsureWorksheetLoaded();
             if(sheetComments == null)
             {
                 return new Dictionary<CellAddress, IComment>();
@@ -2182,6 +2379,7 @@ namespace NPOI.XSSF.UserModel
         /// column; otherwise returns null</returns>
         public IHyperlink GetHyperlink(int row, int column)
         {
+            EnsureWorksheetLoaded();
             return GetHyperlink(new CellAddress(row, column));
         }
 
@@ -2195,6 +2393,7 @@ namespace NPOI.XSSF.UserModel
         /// {@code addr}; otherwise returns {@code null}</returns>
         public IHyperlink GetHyperlink(CellAddress addr)
         {
+            EnsureWorksheetLoaded();
             string ref1 = addr.FormatAsString();
             foreach(XSSFHyperlink hyperlink in hyperlinks)
             {
@@ -2213,6 +2412,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         public List<IHyperlink> GetHyperlinkList()
         {
+            EnsureWorksheetLoaded();
             return hyperlinks.ToList<IHyperlink>();
         }
 
@@ -2223,6 +2423,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns>the width in units of 1/256th of a character width</returns>
         public double GetColumnWidth(int columnIndex)
         {
+            EnsureWorksheetLoaded();
             IColumn col = GetColumn(columnIndex);
 
             double width = (col == null)
@@ -2240,6 +2441,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         public double GetColumnWidthInPixels(int columnIndex)
         {
+            EnsureWorksheetLoaded();
             double widthIn256 = GetColumnWidth(columnIndex);
             return widthIn256 / 256.0 * Units.DEFAULT_CHARACTER_WIDTH;
         }
@@ -2323,6 +2525,7 @@ namespace NPOI.XSSF.UserModel
         /// does not contain merged regions</exception>
         public CellRangeAddress GetMergedRegion(int index)
         {
+            EnsureWorksheetLoaded();
             CT_MergeCells ctMergeCells = worksheet.mergeCells;
             if(ctMergeCells == null)
             {
@@ -2342,6 +2545,7 @@ namespace NPOI.XSSF.UserModel
 
         public CellRangeAddress GetMergedRegion(CellRangeAddress mergedRegion)
         {
+            EnsureWorksheetLoaded();
             if(worksheet.mergeCells == null || worksheet.mergeCells.mergeCell == null)
             {
                 return null;
@@ -2374,6 +2578,7 @@ namespace NPOI.XSSF.UserModel
         /// to remove protection</param>
         public void ProtectSheet(string password)
         {
+            EnsureWorksheetLoaded();
 
             if(password != null)
             {
@@ -2398,6 +2603,7 @@ namespace NPOI.XSSF.UserModel
         /// used for calculating the hash password (Excel 2013)</param>
         public void SetSheetPassword(string password, HashAlgorithm hashAlgo)
         {
+            EnsureWorksheetLoaded();
             if(password == null && !IsSheetProtectionEnabled())
             {
                 return;
@@ -2416,6 +2622,7 @@ namespace NPOI.XSSF.UserModel
         /// may differ ...)</returns>
         public bool ValidateSheetPassword(string password)
         {
+            EnsureWorksheetLoaded();
             if(!IsSheetProtectionEnabled())
             {
                 return password == null;
@@ -2435,6 +2642,7 @@ namespace NPOI.XSSF.UserModel
         /// if its not defined on the sheet</returns>
         public IRow GetRow(int rownum)
         {
+            EnsureWorksheetLoaded();
             if (_rows.TryGetValue(rownum, out XSSFRow row))
             {
                 return row;
@@ -2453,6 +2661,7 @@ namespace NPOI.XSSF.UserModel
         /// if its not defined on the sheet</returns>
         public IColumn GetColumn(int columnnum, bool createIfNull = false)
         {
+            EnsureWorksheetLoaded();
             if (_columns.TryGetValue(columnnum, out XSSFColumn column))
             {
                 return column;
@@ -2473,6 +2682,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="toColumn"></param>
         public void GroupColumn(int fromColumn, int toColumn)
         {
+            EnsureWorksheetLoaded();
             for(int i = fromColumn; i <= toColumn; i++)
             {
                 IColumn column = GetColumn(i, true);
@@ -2489,6 +2699,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         public bool IsColumnBroken(int column)
         {
+            EnsureWorksheetLoaded();
             int[] colBreaks = ColumnBreaks;
             for(int i = 0; i < colBreaks.Length; i++)
             {
@@ -2508,6 +2719,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns>hidden - false if the column is visible</returns>
         public bool IsColumnHidden(int columnIndex)
         {
+            EnsureWorksheetLoaded();
             IColumn col = GetColumn(columnIndex);
             return col != null && col.Hidden;
         }
@@ -2519,6 +2731,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns>true if there is a page break at the indicated row</returns>
         public bool IsRowBroken(int row)
         {
+            EnsureWorksheetLoaded();
             int[] rowBreaks = RowBreaks;
             for(int i = 0; i < rowBreaks.Length; i++)
             {
@@ -2543,6 +2756,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="row">the row to break, inclusive</param>
         public void SetRowBreak(int row)
         {
+            EnsureWorksheetLoaded();
 
             CT_PageBreak pgBreak = worksheet.IsSetRowBreaks()
                 ? worksheet.rowBreaks
@@ -2567,6 +2781,7 @@ namespace NPOI.XSSF.UserModel
         //YK: GetXYZArray() array accessors are deprecated in xmlbeans with JDK 1.5 support
         public void RemoveColumnBreak(int column)
         {
+            EnsureWorksheetLoaded();
             if(!worksheet.IsSetColBreaks())
             {
                 // no breaks
@@ -2590,6 +2805,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="index"></param>
         public void RemoveMergedRegion(int index)
         {
+            EnsureWorksheetLoaded();
             CT_MergeCells ctMergeCells = worksheet.mergeCells;
 
             int size = ctMergeCells.sizeOfMergeCellArray();
@@ -2614,6 +2830,8 @@ namespace NPOI.XSSF.UserModel
             {
                 worksheet.UnsetMergeCells();
             }
+
+            InvalidateMergedRegionsCache();
         }
 
         /// <summary>
@@ -2625,8 +2843,10 @@ namespace NPOI.XSSF.UserModel
         /// <param name="indices">A Set of the regions to unmerge</param>
         public void RemoveMergedRegions(IList<int> indices)
         {
+            EnsureWorksheetLoaded();
             if(!worksheet.IsSetMergeCells())
             {
+                InvalidateMergedRegionsCache();
                 return;
             }
 
@@ -2654,6 +2874,8 @@ namespace NPOI.XSSF.UserModel
             {
                 ctMergeCells.SetMergeCellArray(newMergeCells.ToArray());
             }
+
+            InvalidateMergedRegionsCache();
         }
 
         /// <summary>
@@ -2664,6 +2886,7 @@ namespace NPOI.XSSF.UserModel
         /// <exception cref="ArgumentException"></exception>
         public void RemoveRow(IRow row)
         {
+            EnsureWorksheetLoaded();
             if(row.Sheet != this)
             {
                 throw new ArgumentException("Specified row does not belong to" +
@@ -2707,6 +2930,7 @@ namespace NPOI.XSSF.UserModel
         /// <exception cref="ArgumentException"></exception>
         public void RemoveColumn(IColumn column)
         {
+            EnsureWorksheetLoaded();
             if(column == null)
             {
                 throw new ArgumentException("Column can't be null");
@@ -2764,6 +2988,7 @@ namespace NPOI.XSSF.UserModel
         //YK: GetXYZArray() array accessors are deprecated in xmlbeans with JDK 1.5 support
         public void RemoveRowBreak(int row)
         {
+            EnsureWorksheetLoaded();
             if(!worksheet.IsSetRowBreaks())
             {
                 return;
@@ -2792,6 +3017,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="column">the column to break, inclusive</param>
         public void SetColumnBreak(int column)
         {
+            EnsureWorksheetLoaded();
             if(!IsColumnBroken(column))
             {
                 CT_PageBreak pgBreak = worksheet.IsSetColBreaks() ? worksheet.colBreaks : worksheet.AddNewColBreaks();
@@ -2807,6 +3033,7 @@ namespace NPOI.XSSF.UserModel
 
         public void SetColumnGroupCollapsed(int columnNumber, bool collapsed)
         {
+            EnsureWorksheetLoaded();
             IColumn col = GetColumn(columnNumber);
 
             if(col == null)
@@ -2832,12 +3059,13 @@ namespace NPOI.XSSF.UserModel
         }
 
         /// <summary>
-        /// Get the visibility state for a given column.
+        /// Set the visibility state for a given column.
         /// </summary>
-        /// <param name="columnIndex">the column to get (0-based)</param>
-        /// <param name="hidden">the visiblity state of the column</param>
+        /// <param name="columnIndex">the column to set (0-based)</param>
+        /// <param name="hidden">the visibility state of the column</param>
         public void SetColumnHidden(int columnIndex, bool hidden)
         {
+            EnsureWorksheetLoaded();
             IColumn column = GetColumn(columnIndex, true);
             column.Hidden = hidden;
         }
@@ -2903,6 +3131,7 @@ namespace NPOI.XSSF.UserModel
         /// maximum column width in Excel is 255 characters)</exception>
         public void SetColumnWidth(int columnIndex, double width)
         {
+            EnsureWorksheetLoaded();
             if(width > 255 * 256)
             {
                 throw new ArgumentException("The maximum column width for an " +
@@ -2915,6 +3144,7 @@ namespace NPOI.XSSF.UserModel
 
         public void SetDefaultColumnStyle(int column, ICellStyle style)
         {
+            EnsureWorksheetLoaded();
             IColumn col = GetColumn(column, true);
             col.ColumnStyle = style;
         }
@@ -2930,6 +3160,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="collapse">bool value for collapse</param>
         public void SetRowGroupCollapsed(int rowIndex, bool collapse)
         {
+            EnsureWorksheetLoaded();
             if(collapse)
             {
                 CollapseRow(rowIndex);
@@ -2958,6 +3189,7 @@ namespace NPOI.XSSF.UserModel
         /// <exception cref="ArgumentException">if scale is invalid</exception>
         public void SetZoom(int scale)
         {
+            EnsureWorksheetLoaded();
             if(scale < 10 || scale > 400)
             {
                 throw new ArgumentException("Valid scale values range from 10 to 400");
@@ -2983,6 +3215,7 @@ namespace NPOI.XSSF.UserModel
         /// <exception cref="ArgumentException"></exception>
         public void CopyRows(List<XSSFRow> srcRows, int destStartRow, CellCopyPolicy policy)
         {
+            EnsureWorksheetLoaded();
             if(srcRows == null || srcRows.Count == 0)
             {
                 throw new ArgumentException("No rows to copy");
@@ -3098,6 +3331,7 @@ namespace NPOI.XSSF.UserModel
         /// cells are copied</param>
         public void CopyRows(int srcStartRow, int srcEndRow, int destStartRow, CellCopyPolicy cellCopyPolicy)
         {
+            EnsureWorksheetLoaded();
             List<XSSFRow> srcRows = GetRows(srcStartRow, srcEndRow, false);
             CopyRows(srcRows, destStartRow, cellCopyPolicy);
         }
@@ -3117,6 +3351,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="n">the number of rows to shift</param>
         public void ShiftRows(int startRow, int endRow, int n)
         {
+            EnsureWorksheetLoaded();
             ShiftRows(startRow, endRow, n, false, false);
         }
 
@@ -3135,6 +3370,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="n">the number of column to shift</param>
         public void ShiftColumns(int startColumn, int endColumn, int n)
         {
+            EnsureWorksheetLoaded();
             ShiftColumns(startColumn, endColumn, n, false, false);
         }
 
@@ -3157,6 +3393,7 @@ namespace NPOI.XSSF.UserModel
         //YK: GetXYZArray() array accessors are deprecated in xmlbeans with JDK 1.5 support
         public void ShiftRows(int startRow, int endRow, int n, bool copyRowHeight, bool resetOriginalRowHeight)
         {
+            EnsureWorksheetLoaded();
             int sheetIndex = Workbook.GetSheetIndex(this);
             string sheetName = Workbook.GetSheetName(sheetIndex);
             FormulaShifter shifter = FormulaShifter.CreateForRowShift(
@@ -3221,14 +3458,19 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         public ICellStyle GetColumnStyle(int column)
         {
+            EnsureWorksheetLoaded();
             IColumn col = GetColumn(column);
 
             if(col != null)
             {
-                return col.ColumnStyle;
+                ICellStyle style = col.ColumnStyle;
+                if (style != null)
+                {
+                    return style;
+                }
             }
 
-            return Workbook.GetCellStyleAt(0);
+            return ((XSSFWorkbook)Workbook).GetCellStyleAt(0);
         }
 
         /// <summary>
@@ -3239,6 +3481,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="toRow">end row (0-based)</param>
         public void GroupRow(int fromRow, int toRow)
         {
+            EnsureWorksheetLoaded();
             for(int i = fromRow; i <= toRow; i++)
             {
                 XSSFRow xrow = (XSSFRow) GetRow(i);
@@ -3262,6 +3505,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         public int FindEndOfRowOutlineGroup(int row)
         {
+            EnsureWorksheetLoaded();
             int level = ((XSSFRow) GetRow(row)).GetCTRow().outlineLevel;
             int currentRow;
             int lastRowNum = LastRowNum;
@@ -3279,6 +3523,7 @@ namespace NPOI.XSSF.UserModel
 
         public void UngroupColumn(int fromColumn, int toColumn)
         {
+            EnsureWorksheetLoaded();
             for(int index = fromColumn; index <= toColumn; index++)
             {
                 IColumn col = GetColumn(index);
@@ -3307,6 +3552,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="toRow">end row (0-based)</param>
         public void UngroupRow(int fromRow, int toRow)
         {
+            EnsureWorksheetLoaded();
             for(int i = fromRow; i <= toRow; i++)
             {
                 XSSFRow xrow = (XSSFRow) GetRow(i);
@@ -3333,6 +3579,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="hyperlink">the link to add</param>
         public void AddHyperlink(XSSFHyperlink hyperlink)
         {
+            EnsureWorksheetLoaded();
             hyperlinks.Add(hyperlink);
         }
 
@@ -3343,6 +3590,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="column">column index</param>
         public void RemoveHyperlink(int row, int column)
         {
+            EnsureWorksheetLoaded();
             // CTHyperlinks is regenerated from scratch when writing out the
             // spreadsheet so don't worry about maintaining hyperlinks and
             // CTHyperlinks in parallel. only maintain hyperlinks
@@ -3371,6 +3619,7 @@ namespace NPOI.XSSF.UserModel
         /// </summary>
         public void EnableLocking()
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().sheet = true;
         }
 
@@ -3379,6 +3628,7 @@ namespace NPOI.XSSF.UserModel
         /// </summary>
         public void DisableLocking()
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().sheet = false;
         }
 
@@ -3390,6 +3640,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockAutoFilter(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().autoFilter = enabled;
         }
 
@@ -3401,6 +3652,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockDeleteColumns(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().deleteColumns = enabled;
         }
 
@@ -3412,6 +3664,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockDeleteRows(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().deleteRows = enabled;
         }
 
@@ -3423,6 +3676,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockFormatCells(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().formatCells = enabled;
         }
 
@@ -3434,6 +3688,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockFormatColumns(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().formatColumns = enabled;
         }
 
@@ -3445,6 +3700,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockFormatRows(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().formatRows = enabled;
         }
 
@@ -3456,6 +3712,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockInsertColumns(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().insertColumns = enabled;
         }
 
@@ -3467,6 +3724,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockInsertHyperlinks(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().insertHyperlinks = enabled;
         }
 
@@ -3478,6 +3736,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockInsertRows(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().insertRows = enabled;
         }
 
@@ -3489,6 +3748,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockPivotTables(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().pivotTables = enabled;
         }
 
@@ -3500,6 +3760,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockSort(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().sort = enabled;
         }
 
@@ -3511,6 +3772,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockObjects(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().objects = enabled;
         }
 
@@ -3522,6 +3784,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockScenarios(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().scenarios = enabled;
         }
 
@@ -3533,6 +3796,7 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockSelectLockedCells(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().selectLockedCells = enabled;
         }
 
@@ -3544,11 +3808,13 @@ namespace NPOI.XSSF.UserModel
         /// <param name="enabled"></param>
         public void LockSelectUnlockedCells(bool enabled)
         {
+            EnsureWorksheetLoaded();
             SafeGetProtectionField().selectUnlockedCells = enabled;
         }
 
         public ICellRange<ICell> SetArrayFormula(string formula, CellRangeAddress range)
         {
+            EnsureWorksheetLoaded();
             SSCellRange<ICell> cr = GetCellRange(range);
 
             ICell mainArrayFormulaCell = cr.TopLeftCell;
@@ -3559,6 +3825,7 @@ namespace NPOI.XSSF.UserModel
 
         public ICellRange<ICell> RemoveArrayFormula(ICell cell)
         {
+            EnsureWorksheetLoaded();
             if(cell.Sheet != this)
             {
                 throw new ArgumentException("Specified cell does not belong " +
@@ -3593,6 +3860,7 @@ namespace NPOI.XSSF.UserModel
         //YK: GetXYZArray() array accessors are deprecated in xmlbeans with JDK 1.5 support
         public List<IDataValidation> GetDataValidations()
         {
+            EnsureWorksheetLoaded();
             List<IDataValidation> xssfValidations = new List<IDataValidation>();
             CT_DataValidations dataValidations = worksheet.dataValidations;
             if(dataValidations != null && dataValidations.count > 0)
@@ -3738,6 +4006,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         public List<XSSFTable> GetTables()
         {
+            EnsureWorksheetLoaded();
             List<XSSFTable> tableList = new List<XSSFTable>(
                 tables.Values
             );
@@ -3781,11 +4050,13 @@ namespace NPOI.XSSF.UserModel
 
         public IEnumerator GetEnumerator()
         {
+            EnsureWorksheetLoaded();
             return _rows.Values.GetEnumerator();
         }
 
         public IEnumerator GetRowEnumerator()
         {
+            EnsureWorksheetLoaded();
             return GetEnumerator();
         }
 
@@ -3839,7 +4110,11 @@ namespace NPOI.XSSF.UserModel
 
         public void SetActiveCellRange(int firstRow, int lastRow, int firstColumn, int lastColumn)
         {
-            throw new NotImplementedException();
+            var ctSelection = this.GetSheetTypeSelection();
+            var address = new CellRangeAddress(firstRow,lastRow, firstColumn, lastColumn);
+            string reference= address.FormatAsString();
+            ctSelection.activeCell = reference;
+            ctSelection.sqref = reference;
         }
 
         public short TabColorIndex
@@ -4285,14 +4560,14 @@ namespace NPOI.XSSF.UserModel
                     continue;
                 }
                 
-                var newXSSFChart = newSheetDrawing.CreateChart(newAnchor) as XSSFChart;
+                var newXSSFChart = (newSheetDrawing as XSSFDrawing).CreateChart(newAnchor) as XSSFChart;
                 var linkedChart = sourceCharts.FirstOrDefault(x=>x.GetPackageRelationship().Id == id);
                 if(linkedChart == null)
                     continue;
                 var newXSSFChartAxis = newXSSFChart.GetAxis();
                 foreach(var axis in linkedChart.GetAxis())
                 {
-                    newXSSFChartAxis.Add(axis);   
+                    newXSSFChartAxis.Add(axis);
                 }
 
                 var linkedCTChart = linkedChart.GetCTChart();
@@ -4671,6 +4946,7 @@ namespace NPOI.XSSF.UserModel
         /// than 2 cells</exception>
         private int AddMergedRegion(CellRangeAddress region, bool validate)
         {
+            EnsureWorksheetLoaded();
             if(region.NumberOfCells < 2)
             {
                 throw new ArgumentException("Merged region " +
@@ -4695,6 +4971,7 @@ namespace NPOI.XSSF.UserModel
                 : worksheet.AddNewMergeCells();
             CT_MergeCell ctMergeCell = ctMergeCells.AddNewMergeCell();
             ctMergeCell.@ref = region.FormatAsString();
+            InvalidateMergedRegionsCache();
             return ctMergeCells.sizeOfMergeCellArray() - 1;
         }
 
@@ -4757,6 +5034,11 @@ namespace NPOI.XSSF.UserModel
             {
                 ValidateArrayFormulas(region);
             }
+        }
+
+        private void InvalidateMergedRegionsCache()
+        {
+            _cachedMergedRegions = null;
         }
 
         /// <summary>
@@ -4832,11 +5114,13 @@ namespace NPOI.XSSF.UserModel
 
         private CT_SheetFormatPr GetSheetTypeSheetFormatPr()
         {
+            EnsureWorksheetLoaded();
             return worksheet.IsSetSheetFormatPr() ? worksheet.sheetFormatPr : worksheet.AddNewSheetFormatPr();
         }
 
         private CT_SheetPr GetSheetTypeSheetPr()
         {
+            EnsureWorksheetLoaded();
             if(worksheet.sheetPr == null)
             {
                 worksheet.sheetPr = new CT_SheetPr();
@@ -4847,6 +5131,7 @@ namespace NPOI.XSSF.UserModel
 
         private CT_HeaderFooter GetSheetTypeHeaderFooter()
         {
+            EnsureWorksheetLoaded();
             if(worksheet.headerFooter == null)
             {
                 worksheet.headerFooter = new CT_HeaderFooter();
@@ -4906,6 +5191,7 @@ namespace NPOI.XSSF.UserModel
         /// <returns></returns>
         private CT_OutlinePr EnsureOutlinePr()
         {
+            EnsureWorksheetLoaded();
             CT_SheetPr sheetPr = worksheet.IsSetSheetPr()
                 ? worksheet.sheetPr
                 : worksheet.AddNewSheetPr();
@@ -5692,6 +5978,7 @@ namespace NPOI.XSSF.UserModel
 
         private CT_SheetViews GetSheetTypeSheetViews()
         {
+            EnsureWorksheetLoaded();
             if(worksheet.sheetViews == null)
             {
                 worksheet.sheetViews = new CT_SheetViews();
@@ -5703,6 +5990,7 @@ namespace NPOI.XSSF.UserModel
 
         private CT_SheetProtection SafeGetProtectionField()
         {
+            EnsureWorksheetLoaded();
             if(!IsSheetProtectionEnabled())
             {
                 return worksheet.AddNewSheetProtection();
@@ -5713,6 +6001,7 @@ namespace NPOI.XSSF.UserModel
 
         private bool IsSheetProtectionEnabled()
         {
+            EnsureWorksheetLoaded();
             return worksheet.IsSetSheetProtection();
         }
 
@@ -5803,6 +6092,7 @@ namespace NPOI.XSSF.UserModel
 
         private CellRangeAddress GetRepeatingRowsOrColums(bool rows)
         {
+            EnsureWorksheetLoaded();
             int sheetIndex = Workbook.GetSheetIndex(this);
             if(Workbook is not XSSFWorkbook xwb)
             {
@@ -5855,6 +6145,7 @@ namespace NPOI.XSSF.UserModel
         private void SetRepeatingRowsAndColumns(
             CellRangeAddress rowDef, CellRangeAddress colDef)
         {
+            EnsureWorksheetLoaded();
             int col1 = -1;
             int col2 = -1;
             int row1 = -1;
@@ -6181,7 +6472,7 @@ namespace NPOI.XSSF.UserModel
                 XSSFRelation.PIVOT_TABLE,
                 XSSFFactory.GetInstance(),
                 tableId);
-            pivotTable.SetParentSheet(this);
+            pivotTable.ParentSheet = this;
             pivotTables.Add(pivotTable);
             XSSFWorkbook workbook = GetWorkbook();
 
@@ -6202,7 +6493,7 @@ namespace NPOI.XSSF.UserModel
             pivotTable.SetPivotCacheDefinition(pivotCacheDefinition);
 
             //Create pivotCache and Sets up it's relationship with the workbook
-            pivotTable.SetPivotCache(new XSSFPivotCache(workbook.AddPivotCache(rId)));
+            pivotTable.PivotCache = new XSSFPivotCache(workbook.AddPivotCache(rId));
 
             //Create relationship between pivotcacherecord and pivotcachedefInition
             XSSFPivotCacheRecords pivotCacheRecords = (XSSFPivotCacheRecords) pivotCacheDefinition.CreateRelationship(
@@ -6461,9 +6752,9 @@ namespace NPOI.XSSF.UserModel
         public void SetDefaultColWidth(int Width)
         {
             IFont ift = GetWorkbook().GetStylesSource().GetFontAt(0);
-            Font ft = SheetUtil.IFont2Font(ift);
-            var rt = TextMeasurer.MeasureSize("0", new TextOptions(ft));
-            double MDW = rt.Width + 1; //MaximumDigitWidth
+            using SKFont ft = SheetUtil.IFont2Font(ift);
+            using var paint = new SKPaint { Typeface = ft.Typeface, TextSize = ft.Size };
+            double MDW = paint.MeasureText("0") + 1; //MaximumDigitWidth
 
             worksheet.sheetFormatPr.defaultColWidth = Width / Units.EMU_PER_PIXEL / MDW;
             worksheet.cols.Clear();
@@ -6608,11 +6899,6 @@ lblforbreak:
 
         #endregion
 
-        public CellRangeAddressList GetCells(string cellranges)
-        {
-            return CellRangeAddressList.Parse(cellranges);
-        }
-
         /// <summary>
         /// called when a sheet is being deleted/removed from a workbook, to clean up relations and other document pieces tied to the sheet
         /// </summary>
@@ -6624,6 +6910,36 @@ lblforbreak:
                     continue;
                 }
                 RemoveRelation(part.DocumentPart, true);
+            }
+        }
+
+        public DataTable ToDataTable(bool firstRowAsHeader = false, bool showCalculatedValue = false)
+        {
+            return SheetUtil.ToDataTable(this, firstRowAsHeader, showCalculatedValue);
+        }
+        
+        public XSSFHeaderFooterProperties HeaderFooterProperties
+        {
+            get
+            {
+                return new XSSFHeaderFooterProperties(GetSheetTypeHeaderFooter());
+            }
+        }
+
+        public NCellRange Cells
+        {
+            get {
+                return new NCellRange(this, 0, 0, this.Workbook.SpreadsheetVersion.MaxRows, this.Workbook.SpreadsheetVersion.MaxColumns);
+            }
+            
+        }
+
+        public NCellRange this[string address] => Cells[address];
+
+        public NRowRange Rows
+        {
+            get {
+                return new NRowRange(this, 0, this.Workbook.SpreadsheetVersion.MaxRows);
             }
         }
     }

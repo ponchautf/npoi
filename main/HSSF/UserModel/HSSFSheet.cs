@@ -36,7 +36,8 @@ namespace NPOI.HSSF.UserModel
     using NPOI.SS.UserModel.Helpers;
     using NPOI.HSSF.UserModel.helpers;
 
-    using SixLabors.Fonts;
+    using SkiaSharp;
+    using System.Data;
 
     /// <summary>
     /// High level representation of a worksheet.
@@ -562,10 +563,10 @@ namespace NPOI.HSSF.UserModel
         }
 
         /// <summary>
-        /// Get the visibility state for a given column.F:\Gloria\�о�\�ļ���ʽ\NPOI\src\NPOI\HSSF\Util\HSSFDataValidation.cs
+        /// Set the visibility state for a given column.
         /// </summary>
-        /// <param name="column">the column to Get (0-based).</param>
-        /// <param name="hidden">the visiblity state of the column.</param>
+        /// <param name="column">the column to set (0-based).</param>
+        /// <param name="hidden">the visibility state of the column.</param>
         public void SetColumnHidden(int column, bool hidden)
         {
             _sheet.SetColumnHidden(column, hidden);
@@ -1642,6 +1643,22 @@ namespace NPOI.HSSF.UserModel
             // Re-compute the first and last rows of the sheet as needed
             recomputeFirstAndLastRowsForRowShift(startRow, endRow, n);
 
+            // When shifting rows up (n < 0), remove the vacated rows that fall outside the shifted range.
+            // After the shift, rows from (endRow + n + 1) to endRow have had their cells moved but
+            // the row objects remain in the dictionary, causing PhysicalNumberOfRows to be incorrect.
+            if (n < 0)
+            {
+                int firstVacatedRow = Math.Max(startRow, endRow + n + 1);
+                for (int i = firstVacatedRow; i <= endRow; i++)
+                {
+                    IRow row = GetRow(i);
+                    if (row != null)
+                    {
+                        RemoveRow(row);
+                    }
+                }
+            }
+
             //if (endRow == lastrow || endRow + n > lastrow) lastrow = Math.Min(endRow + n, SpreadsheetVersion.EXCEL97.LastRowIndex);
             //if (startRow == firstrow || startRow + n < firstrow) firstrow = Math.Max(startRow + n, 0);
 
@@ -1788,8 +1805,8 @@ namespace NPOI.HSSF.UserModel
         /// </summary>
         /// <param name="colSplit">Horizonatal position of split.</param>
         /// <param name="rowSplit">Vertical position of split.</param>
-        /// <param name="leftmostColumn">Top row visible in bottom pane</param>
-        /// <param name="topRow">Left column visible in right pane.</param>
+        /// <param name="leftmostColumn">Left column visible in right pane.</param>
+        /// <param name="topRow">Top row visible in bottom pane</param>
         public void CreateFreezePane(int colSplit, int rowSplit, int leftmostColumn, int topRow)
         {
             ValidateColumn(colSplit);
@@ -2342,19 +2359,10 @@ namespace NPOI.HSSF.UserModel
             AutoSizeColumn(column, false);
         }
 
-        /// <summary>
-        /// Adjusts the column width to fit the contents.
-        /// This Process can be relatively slow on large sheets, so this should
-        /// normally only be called once per column, at the end of your
-        /// Processing.
-        /// You can specify whether the content of merged cells should be considered or ignored.
-        /// Default is to ignore merged cells.
-        /// </summary>
-        /// <param name="column">the column index</param>
-        /// <param name="useMergedCells">whether to use the contents of merged cells when calculating the width of the column</param>
-        public void AutoSizeColumn(int column, bool useMergedCells)
+        /// <inheritdoc />
+        public void AutoSizeColumn(int column, int maxRows)
         {
-            AutoSizeColumn(column, useMergedCells, maxRows: 0);
+            AutoSizeColumn(column, false, maxRows);
         }
 
         /// <summary>
@@ -2371,16 +2379,16 @@ namespace NPOI.HSSF.UserModel
         public void AutoSizeColumn(int column, bool useMergedCells, int maxRows = 0)
         {
             double width = SheetUtil.GetColumnWidth(this, column, useMergedCells, maxRows);
-            if (width != -1)
+            if(width != -1)
             {
                 width *= 256;
                 int maxColumnWidth = 255 * 256; // The maximum column width for an individual cell is 255 characters
 
-                if (width > maxColumnWidth)
+                if(width > maxColumnWidth)
                 {
                     width = maxColumnWidth;
                 }
-                SetColumnWidth(column, (int)width);
+                SetColumnWidth(column, (int) width);
             }
         }
 
@@ -2483,10 +2491,9 @@ namespace NPOI.HSSF.UserModel
         /// </summary>
         /// <param name="font1">The font.</param>
         /// <returns></returns>
-        public Font HSSFFont2Font(HSSFFont font1)
+        public SKFont HSSFFont2Font(HSSFFont font1)
         {
-            // TODO-Fonts: Fallback for missing font
-            return new Font(SystemFonts.Get(font1.FontName), (float)font1.FontHeightInPoints);
+            return SheetUtil.IFont2Font(font1);
         }
 
         /// <summary>
@@ -3374,9 +3381,28 @@ namespace NPOI.HSSF.UserModel
         {
             return rows.Values.GetEnumerator();
         }
-        public CellRangeAddressList GetCells(string cellranges)
+
+        public DataTable ToDataTable(bool firstRowAsHeader = false, bool showCalculatedValue = false)
         {
-            return CellRangeAddressList.Parse(cellranges);
+            return SheetUtil.ToDataTable(this, firstRowAsHeader, showCalculatedValue);
+        }
+
+        public NCellRange Cells
+        {
+            get
+            {
+                return new NCellRange(this, 0, 0, this.Workbook.SpreadsheetVersion.MaxRows, this.Workbook.SpreadsheetVersion.MaxColumns);
+            }
+        }
+
+        public NCellRange this[string address] => Cells[address];
+
+        public NRowRange Rows
+        {
+            get
+            {
+                return new NRowRange(this, 0, this.Workbook.SpreadsheetVersion.MaxRows);
+            }
         }
     }
 }

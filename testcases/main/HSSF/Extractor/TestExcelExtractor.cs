@@ -236,7 +236,6 @@ using NPOI.HSSF.Record.Crypto;
             extractor.Close();
         }
         [Test]
-        //[Ignore("TODO FIX CI TESTS")]
         public void TestFormatting()
         {
             ExcelExtractor extractor = CreateExtractor("Formatting.xls");
@@ -359,7 +358,6 @@ using NPOI.HSSF.Record.Crypto;
             }
         }
         [Test]
-        [Ignore("encrypt/decrypt were not implemented")]
         public void TestPassword()
         {
             Biff8EncryptionKey.CurrentUserPassword = ("password");
@@ -370,6 +368,7 @@ using NPOI.HSSF.Record.Crypto;
             POITestCase.AssertContains(text,"ZIP");
             extractor.Close();
         }
+
         [Test]
         public void TestNullPointerException()
         {

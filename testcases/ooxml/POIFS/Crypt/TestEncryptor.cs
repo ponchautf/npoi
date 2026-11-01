@@ -19,10 +19,15 @@ namespace TestCases.POIFS.Crypt
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Reflection;
+    using System.Reflection.Emit;
     using NPOI.OpenXml4Net.OPC;
     using NPOI.POIFS.Crypt;
     using NPOI.POIFS.Crypt.Agile;
+    using NPOI.POIFS.Crypt.BinaryRC4;
+    using NPOI.POIFS.Crypt.CryptoAPI;
     using NPOI.POIFS.FileSystem;
+    using NPOI.POIFS.Crypt.Standard;
     using NPOI.Util;
     using NPOI.XWPF.UserModel;
     using NUnit.Framework;using NUnit.Framework.Legacy;
@@ -31,8 +36,28 @@ namespace TestCases.POIFS.Crypt
     [TestFixture]
     public class TestEncryptor
     {
+        [TestCase(typeof(AgileEncryptor))]
+        [TestCase(typeof(StandardEncryptor))]
+        [TestCase(typeof(CryptoAPIEncryptor))]
+        [TestCase(typeof(BinaryRC4Encryptor))]
+        public void ConfirmPasswordStringDoesNotReferenceSystemRandom(Type encryptorType)
+        {
+            var method = encryptorType.GetMethod(nameof(Encryptor.ConfirmPassword), new[] { typeof(string) });
+            ClassicAssert.IsNotNull(method);
+
+            var randomReferences = new List<string>();
+            foreach(var referencedMethod in GetReferencedMethods(method))
+            {
+                if(referencedMethod.DeclaringType == typeof(Random))
+                {
+                    randomReferences.Add(referencedMethod.ToString());
+                }
+            }
+
+            ClassicAssert.IsEmpty(randomReferences, $"{encryptorType.FullName}.ConfirmPassword(string) should not reference System.Random members, but found: {string.Join(", ", randomReferences)}");
+        }
+
         [Test]
-        [Ignore("TODO FIX CI TESTS")]
         public void BinaryRC4Encryption()
         {
             // please contribute a real sample file, which is binary rc4 encrypted
@@ -74,8 +99,8 @@ namespace TestCases.POIFS.Crypt
         [Test]
         public void AgileEncryption()
         {
-            int maxKeyLen = Cipher.GetMaxAllowedKeyLength("AES");
-            Assume.That(maxKeyLen == 2147483647, "Please install JCE Unlimited Strength Jurisdiction Policy files for AES 256");
+            //int maxKeyLen = Cipher.GetMaxAllowedKeyLength("AES");
+            //Assume.That(maxKeyLen == 2147483647, "Please install JCE Unlimited Strength Jurisdiction Policy files for AES 256");
 
             FileStream file = POIDataSamples.GetDocumentInstance().GetFile("bug53475-password-is-pass.docx");
             String pass = "pass";
@@ -96,12 +121,11 @@ namespace TestCases.POIFS.Crypt
             ClassicAssert.AreEqual(decPackLenExpected, payloadExpected.Length);
 
             is1 = nfs.Root.CreateDocumentInputStream(Decryptor.DEFAULT_POIFS_ENTRY);
-            ///is1 = new BoundedInputStream(is1, is1.Available() - 16); // ignore pAdding block
-            ///throw new NotImplementedException(BoundedInputStream); 
-            byte[] encPackExpected = IOUtils.ToByteArray(is1);
+            DocumentEntry entry = (DocumentEntry)nfs.Root.GetEntryCaseInsensitive(Decryptor.DEFAULT_POIFS_ENTRY);
+            is1 = nfs.Root.CreateDocumentInputStream(entry);
+            // ignore pAdding block
+            byte[] encPackExpected = IOUtils.ToByteArray(is1, entry.Size - 16);
             is1.Close();
-
-            // listDir(nfs.Root, "orig", "");
 
             nfs.Close();
 
@@ -147,14 +171,11 @@ namespace TestCases.POIFS.Crypt
             is1.Close();
 
             long decPackLenActual = decActual.GetLength();
-
-            is1 = nfs.Root.CreateDocumentInputStream(Decryptor.DEFAULT_POIFS_ENTRY);
-            ///is1 = new BoundedInputStream(is1, is1.Available() - 16); // ignore pAdding block
-            ///throw new NotImplementedException(BoundedInputStream);
-            byte[] encPackActual = IOUtils.ToByteArray(is1);
+            entry = (DocumentEntry)nfs.Root.GetEntryCaseInsensitive(Decryptor.DEFAULT_POIFS_ENTRY);
+            is1 = nfs.Root.CreateDocumentInputStream(entry);
+            // ignore pAdding block
+            byte[] encPackActual = IOUtils.ToByteArray(is1, entry.Size - 16);
             is1.Close();
-
-            // listDir(nfs.Root, "copy", "");
 
             nfs.Close();
 
@@ -167,7 +188,6 @@ namespace TestCases.POIFS.Crypt
         }
 
         [Test]
-        [Ignore("TODO FIX CI TESTS")]
         public void StandardEncryption()
         {
             FileStream file = POIDataSamples.GetDocumentInstance().GetFile("bug53475-password-is-solrcell.docx");
@@ -231,15 +251,10 @@ namespace TestCases.POIFS.Crypt
             IOUtils.Copy(new MemoryStream(payloadExpected), os);
             os.Close();
 
-            bos.Seek(0, SeekOrigin.Begin); //bos.Reset();
+            bos.Seek(0, SeekOrigin.Begin);
             fs.WriteFileSystem(bos);
 
             ByteArrayInputStream bis = new ByteArrayInputStream(bos.ToArray());
-
-            // FileOutputStream fos = new FileOutputStream("encrypted.docx");
-            // IOUtils.Copy(bis, fos);
-            // fos.Close();
-            // bis.Reset();
 
             nfs = new NPOIFSFileSystem(bis);
             infoExpected = new EncryptionInfo(nfs);
@@ -247,7 +262,8 @@ namespace TestCases.POIFS.Crypt
             passed = d.VerifyPassword(pass);
             ClassicAssert.IsTrue(passed, "Unable to Process: document is encrypted");
 
-            bos.Seek(0, SeekOrigin.Begin); //bos.Reset();
+            bos.SetLength(0);          // truncate previous contents
+            bos.Seek(0, SeekOrigin.Begin);
             is1 = d.GetDataStream(nfs);
             IOUtils.Copy(is1, bos);
             is1.Close();
@@ -265,18 +281,16 @@ namespace TestCases.POIFS.Crypt
          * http://stackoverflow.com/questions/28593223
          */
         [Test]
-        [Ignore("TODO FIX CI TESTS")]
         public void EncryptPackageWithoutCoreProperties()
         {
             // Open our file without core properties
             FileStream inp = POIDataSamples.GetOpenXML4JInstance().GetFile("OPCCompliance_NoCoreProperties.xlsx");
-            OPCPackage pkg = OPCPackage.Open(inp.Name);
+            OPCPackage pkg = OPCPackage.Open(inp);
 
             // It doesn't have any core properties yet
             ClassicAssert.AreEqual(0, pkg.GetPartsByContentType(ContentTypes.CORE_PROPERTIES_PART).Count);
             ClassicAssert.IsNotNull(pkg.GetPackageProperties());
-            ClassicAssert.IsNotNull(pkg.GetPackageProperties().GetLanguageProperty());
-            //ClassicAssert.IsNull(pkg.GetPackageProperties().GetLanguageProperty().GetValue());
+            ClassicAssert.IsNull(pkg.GetPackageProperties().GetLanguageProperty());
 
             // Encrypt it
             EncryptionInfo info = new EncryptionInfo(EncryptionMode.Agile);
@@ -286,6 +300,7 @@ namespace TestCases.POIFS.Crypt
             enc.ConfirmPassword("password");
             OutputStream os = enc.GetDataStream(fs);
             pkg.Save(os);
+            os.Close();
             pkg.Revert();
 
             // Save the resulting OLE2 document, and re-open it
@@ -305,8 +320,7 @@ namespace TestCases.POIFS.Crypt
             // Check it now has empty core properties
             ClassicAssert.AreEqual(1, inpPkg.GetPartsByContentType(ContentTypes.CORE_PROPERTIES_PART).Count);
             ClassicAssert.IsNotNull(inpPkg.GetPackageProperties());
-            ClassicAssert.IsNotNull(inpPkg.GetPackageProperties().GetLanguageProperty());
-            //ClassicAssert.IsNull(inpPkg.PackageProperties.LanguageProperty.Value);
+            ClassicAssert.IsNull(inpPkg.GetPackageProperties().GetLanguageProperty());
         }
 
         [Test]
@@ -377,6 +391,92 @@ namespace TestCases.POIFS.Crypt
                 }
             }
         }
+
+        private static IEnumerable<MethodBase> GetReferencedMethods(MethodInfo method)
+        {
+            var methodBody = method.GetMethodBody();
+            ClassicAssert.IsNotNull(methodBody);
+
+            var il = methodBody.GetILAsByteArray();
+            var position = 0;
+            while(position < il.Length)
+            {
+                var opCode = ReadOpCode(il, ref position);
+                if(opCode.OperandType == OperandType.InlineMethod)
+                {
+                    var metadataToken = BitConverter.ToInt32(il, position);
+                    position += sizeof(int);
+                    yield return method.Module.ResolveMethod(metadataToken);
+                    continue;
+                }
+
+                position += GetOperandSize(opCode.OperandType, il, position);
+            }
+        }
+
+        private static OpCode ReadOpCode(byte[] il, ref int position)
+        {
+            var opCodeValue = il[position++];
+            if(opCodeValue != 0xfe)
+            {
+                return SingleByteOpCodes[opCodeValue];
+            }
+
+            return MultiByteOpCodes[(short)(0xfe00 | il[position++])];
+        }
+
+        private static int GetOperandSize(OperandType operandType, byte[] il, int position)
+        {
+            switch(operandType)
+            {
+                case OperandType.InlineNone:
+                    return 0;
+                case OperandType.ShortInlineBrTarget:
+                case OperandType.ShortInlineI:
+                case OperandType.ShortInlineVar:
+                    return 1;
+                case OperandType.InlineVar:
+                    return 2;
+                case OperandType.InlineI:
+                case OperandType.InlineBrTarget:
+                case OperandType.InlineField:
+                case OperandType.InlineSig:
+                case OperandType.InlineString:
+                case OperandType.InlineTok:
+                case OperandType.InlineType:
+                case OperandType.ShortInlineR:
+                    return 4;
+                case OperandType.InlineI8:
+                case OperandType.InlineR:
+                    return 8;
+                case OperandType.InlineSwitch:
+                    return sizeof(int) * (BitConverter.ToInt32(il, position) + 1);
+                default:
+                    throw new NotSupportedException($"Unsupported operand type {operandType}.");
+            }
+        }
+
+        private static Dictionary<short, OpCode> CreateOpCodeLookup(short prefix)
+        {
+            var opCodes = new Dictionary<short, OpCode>();
+            foreach(var field in typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static))
+            {
+                if(field.GetValue(null) is not OpCode opCode)
+                {
+                    continue;
+                }
+
+                if((short)(opCode.Value & unchecked((short)0xff00)) == prefix)
+                {
+                    opCodes[opCode.Value] = opCode;
+                }
+            }
+
+            return opCodes;
+        }
+
+        private static readonly Dictionary<short, OpCode> SingleByteOpCodes = CreateOpCodeLookup(0x0000);
+        private static readonly Dictionary<short, OpCode> MultiByteOpCodes = CreateOpCodeLookup(unchecked((short)0xfe00));
     }
 
 }

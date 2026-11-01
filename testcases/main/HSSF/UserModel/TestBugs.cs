@@ -41,7 +41,7 @@ namespace TestCases.HSSF.UserModel
     using NPOI.HSSF.Record.Crypto;
     using NPOI.HSSF;
     using System.Net;
-    using SixLabors.ImageSharp;
+    using SkiaSharp;
     using NPOI.HPSF;
 
     /**
@@ -122,13 +122,12 @@ namespace TestCases.HSSF.UserModel
         /**Test writing a hyperlink
          * Open resulting sheet in Excel and Check that A1 contains a hyperlink*/
         [Test]
-        [Ignore("not found in poi")]
         public void Test23094()
         {
             HSSFWorkbook wb = new HSSFWorkbook();
             ISheet s = wb.CreateSheet();
             IRow r = s.CreateRow(0);
-            r.CreateCell(0).CellFormula = ("HYPERLINK( \"http://jakarta.apache.org\", \"Jakarta\" )");
+            r.CreateCell(0).CellFormula = "HYPERLINK( \"http://jakarta.apache.org\", \"Jakarta\" )";
 
             WriteTestOutputFileForViewing(wb, "Test23094");
         }
@@ -2569,7 +2568,7 @@ namespace TestCases.HSSF.UserModel
             sheet.ShiftRows(1, 1, -1);
             ClassicAssert.AreEqual(3, sheet.LastRowNum);
             ClassicAssert.AreEqual("Cell A,2", sheet.GetRow(0).GetCell(0).StringCellValue);
-            ClassicAssert.AreEqual(-1, sheet.GetRow(1).LastCellNum);
+            ClassicAssert.IsNull(sheet.GetRow(1));
             ClassicAssert.AreEqual("Cell A,3", sheet.GetRow(2).GetCell(0).StringCellValue);
             ClassicAssert.AreEqual("Cell A,1", sheet.GetRow(3).GetCell(0).StringCellValue);
 
@@ -2579,12 +2578,7 @@ namespace TestCases.HSSF.UserModel
             ClassicAssert.AreEqual("Cell A,2", sheet.GetRow(0).GetCell(0).StringCellValue);
             ClassicAssert.AreEqual("Cell A,1", sheet.GetRow(1).GetCell(0).StringCellValue);
             ClassicAssert.AreEqual("Cell A,3", sheet.GetRow(2).GetCell(0).StringCellValue);
-            ClassicAssert.AreEqual(-1, sheet.GetRow(3).LastCellNum);
-
-            // Now zap the empty 4th row - won't do anything
-            sheet.RemoveRow(sheet.GetRow(3));
-
-            // Test again the last row number which should be 2
+            ClassicAssert.IsNull(sheet.GetRow(3));
             ClassicAssert.AreEqual(2, sheet.LastRowNum);
             ClassicAssert.AreEqual("Cell A,2", sheet.GetRow(0).GetCell(0).StringCellValue);
             ClassicAssert.AreEqual("Cell A,1", sheet.GetRow(1).GetCell(0).StringCellValue);
@@ -3345,12 +3339,12 @@ namespace TestCases.HSSF.UserModel
             // Get structure from webservice
             String urlString = "http://poi.apache.org/resources/images/project-logo.jpg";
             Uri structURL = new Uri(urlString);
-            Image bimage;
+            SKBitmap bimage;
             try
             {
                 WebClient client = new WebClient();
                 MemoryStream ms = new MemoryStream(client.DownloadData(structURL));
-                bimage = Image.Load(ms);
+                bimage = SKBitmap.Decode(ms);
                 ms.Close();
             }
             catch (WebException)
@@ -3359,12 +3353,10 @@ namespace TestCases.HSSF.UserModel
                 return;
             }
             // Convert BufferedImage to byte[]
-            ByteArrayOutputStream imageBAOS = new ByteArrayOutputStream();
-            //ImageIO.write(bimage, "jpeg", imageBAOS);
-            bimage.SaveAsJpeg(imageBAOS);
-            imageBAOS.Flush();
-            byte[] imageBytes = imageBAOS.ToByteArray();
-            imageBAOS.Close();
+            MemoryStream imageBAOS = new MemoryStream();
+            bimage.Encode(imageBAOS, SKEncodedImageFormat.Jpeg, 100);
+            byte[] imageBytes = imageBAOS.ToArray();
+            imageBAOS.Dispose();
             // Pop structure into Structure HSSFSheet
             int pict = wb.AddPicture(imageBytes, PictureType.JPEG);
             ISheet sheet = wb.GetSheet("Structure");
@@ -3518,6 +3510,34 @@ namespace TestCases.HSSF.UserModel
                 PropertySet properties =
                         new PropertySet(new DocumentInputStream(entry));
             });
+        }
+
+        [Test]
+        public void Test51262() 
+        {
+            HSSFWorkbook wb = HSSFTestDataSamples.OpenSampleWorkbook("51262.xls");
+            ISheet sheet = wb.GetSheetAt(0);
+            IRow row = sheet.GetRow(2);
+
+            ICell cell = row.GetCell(1);
+            ICellStyle style = cell.CellStyle;
+            ClassicAssert.AreEqual(26, style.FontIndex);
+
+            row = sheet.GetRow(3);
+            cell = row.GetCell(1);
+            style = cell.CellStyle;
+            ClassicAssert.AreEqual(28, style.FontIndex);
+
+            // check the two fonts
+            HSSFFont font = wb.GetFontAt((short) 26) as HSSFFont;
+            ClassicAssert.IsTrue(font.IsBold);
+            ClassicAssert.AreEqual(10, font.FontHeightInPoints);
+            ClassicAssert.AreEqual("\uFF2D\uFF33 \uFF30\u30B4\u30B7\u30C3\u30AF", font.FontName);
+
+            font = wb.GetFontAt((short) 28) as HSSFFont;
+            ClassicAssert.IsTrue(font.IsBold);
+            ClassicAssert.AreEqual(10, font.FontHeightInPoints);
+            ClassicAssert.AreEqual("\uFF2D\uFF33 \uFF30\u30B4\u30B7\u30C3\u30AF", font.FontName);
         }
 
         // follow https://svn.apache.org/viewvc?view=revision&revision=1896552 to write a unit test for this fix.

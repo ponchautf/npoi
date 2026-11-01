@@ -28,6 +28,7 @@ namespace NPOI.XWPF.UserModel
     using S=NPOI.OpenXmlFormats.Shared;
     using NPOI.POIFS.Properties;
     using System.Data;
+    using Org.BouncyCastle.Asn1.Mozilla;
 
     /**
 * <p>A Paragraph within a Document, Table, Header etc.</p> 
@@ -569,18 +570,27 @@ namespace NPOI.XWPF.UserModel
         /// <summary>
         /// Returns the paragraph alignment which shall be applied to text in this paragraph.
         /// </summary>
-        public ParagraphAlignment Alignment
+        public ParagraphAlignment? Alignment
         {
             get
             {
-                CT_PPr pr = GetCTPPr();
-                return pr == null || !pr.IsSetJc() ? ParagraphAlignment.LEFT : EnumConverter.ValueOf<ParagraphAlignment, ST_Jc>(pr.jc.val);
+                CT_PPr pr = GetCTPPr(false);
+                return (pr == null || !pr.IsSetJc()) ? ParagraphAlignment.LEFT : EnumConverter.ValueOf<ParagraphAlignment, ST_Jc>(pr.jc.val);
             }
             set
             {
-                CT_PPr pr = GetCTPPr();
-                CT_Jc jc = pr.IsSetJc() ? pr.jc : pr.AddNewJc();
-                jc.val = EnumConverter.ValueOf<ST_Jc, ParagraphAlignment>(value);
+                if(value==null)
+                {
+                    CT_PPr pr = GetCTPPr(false);
+                    if(pr!=null)
+                        pr.UnsetJc();
+                }
+                else
+                {
+                    CT_PPr pr = GetCTPPr(true);
+                    CT_Jc jc = pr.IsSetJc() ? pr.jc : pr.AddNewJc();
+                    jc.val = EnumConverter.ValueOf<ST_Jc, ParagraphAlignment>((ParagraphAlignment) value);
+                }
             }
         }
 
@@ -621,7 +631,7 @@ namespace NPOI.XWPF.UserModel
         {
             get
             {
-                CT_PPr pr = GetCTPPr();
+                CT_PPr pr = GetCTPPr(false);
                 return (pr == null || !pr.IsSetTextAlignment()) ? TextAlignment.AUTO
                         : EnumConverter.ValueOf<TextAlignment, ST_TextAlignment>(pr.textAlignment.val);
             }
@@ -1242,8 +1252,8 @@ namespace NPOI.XWPF.UserModel
         {
             get
             {
-                CT_OnOff wordWrap = GetCTPPr().IsSetWordWrap() ? GetCTPPr()
-                        .wordWrap : null;
+                var ppr = GetCTPPr(false);
+                CT_OnOff wordWrap = ppr!=null && ppr.IsSetWordWrap() ? ppr.wordWrap : null;
                 if (wordWrap != null)
                 {
                     return wordWrap.val;
@@ -1274,15 +1284,28 @@ namespace NPOI.XWPF.UserModel
         {
             get
             {
-                CT_PPr pr = GetCTPPr();
+                CT_PPr pr = GetCTPPr(false);
+                if(pr==null)
+                {
+                    return null;
+                }
                 CT_String style = pr.IsSetPStyle() ? pr.pStyle : null;
                 return style != null ? style.val : null;
             }
             set
             {
-                CT_PPr pr = GetCTPPr();
-                CT_String style = pr.pStyle != null ? pr.pStyle : pr.AddNewPStyle();
-                style.val = value;
+                if(value==null)
+                {
+                    var pr= GetCTPPr(false);
+                    if(pr!=null)
+                        pr.jc = null;
+                }
+                else
+                { 
+                    CT_PPr pr = GetCTPPr(true);
+                    CT_String style = pr.pStyle != null ? pr.pStyle : pr.AddNewPStyle();
+                    style.val = value;
+                }
             }
         }
 
@@ -1292,12 +1315,15 @@ namespace NPOI.XWPF.UserModel
          */
         private CT_PBdr GetCTPBrd(bool create)
         {
-            CT_PPr pr = GetCTPPr();
+            CT_PPr pr = GetCTPPr(create);
+            if(pr==null)
+            {
+                return null;
+            }
             CT_PBdr ct = pr.IsSetPBdr() ? pr.pBdr : null;
-            if (create && ct == null)
+            if(create && ct == null)
                 ct = pr.AddNewPBdr();
             return ct;
-
         }
 
         /**
@@ -1306,8 +1332,12 @@ namespace NPOI.XWPF.UserModel
          */
         private CT_Spacing GetCTSpacing(bool create)
         {
-            CT_PPr pr = GetCTPPr();
-            CT_Spacing ct = pr.spacing == null ? null : pr.spacing;
+            CT_PPr pr = GetCTPPr(create);
+            if(pr==null)
+            {
+                return null;
+            }
+            CT_Spacing ct = pr?.spacing;
             if (create && ct == null)
                 ct = pr.AddNewSpacing();
             return ct;
@@ -1319,20 +1349,23 @@ namespace NPOI.XWPF.UserModel
          */
         private CT_Ind GetCTInd(bool create)
         {
-            CT_PPr pr = GetCTPPr();
+            CT_PPr pr = GetCTPPr(create);
             CT_Ind ct = pr.ind == null ? null : pr.ind;
             if (create && ct == null)
                 ct = pr.AddNewInd();
             return ct;
         }
-
+        internal CT_PPr GetCTPPr()
+        {
+            return GetCTPPr(true);
+        }
         /**
          * Get a <b>copy</b> of the currently used CTPPr, if none is used, return
          * a new instance.
          */
-        internal CT_PPr GetCTPPr()
+        internal CT_PPr GetCTPPr(bool create)
         {
-            CT_PPr pr = paragraph.pPr == null ? paragraph.AddNewPPr()
+            CT_PPr pr = (paragraph.pPr == null||!create) ? paragraph.AddNewPPr()
                     : paragraph.pPr;
             return pr;
         }
@@ -1818,6 +1851,13 @@ namespace NPOI.XWPF.UserModel
             iRuns.Add(newRun);
             return newRun;
         }
+        public XWPFFieldRun CreateFieldRun(string instruction, string text)
+        {
+            var fieldrun = this.CreateFieldRun();
+            fieldrun.FieldInstruction= instruction;
+            fieldrun.SetText(text);
+            return fieldrun;
+        }
 
         public void ChangeOrientation(ST_PageOrientation orientation)
         {
@@ -1861,6 +1901,65 @@ namespace NPOI.XWPF.UserModel
             long count = runs.Count(r=>(r is XWPFFieldRun)
             && ctField  == ((XWPFFieldRun) r).GetCTField());
             return count <= 1;
+        }
+
+        /// <summary>
+        /// Returns true if the paragraph has a paragraph alignment value of its own
+        /// or false in case it should fall back to the alignment value set by the paragraph style.
+        /// </summary>
+        /// <returns></returns>
+        public bool IsAlignmentSet()
+        {
+            var pr = GetCTPPr(false);
+            return pr != null && pr.IsSetJc();
+        }
+
+        public bool RunsIsEmpty()
+        {
+            return runs.Count==0;
+        }
+
+        /// <summary>
+        /// Indicates whether this paragraph should be kept on the same page as the next one.
+        /// </summary>
+        public bool IsKeepNext
+        {
+            get {
+                if(GetCTP() != null && GetCTP().pPr != null && GetCTP().pPr.IsSetKeepNext())
+                {
+                    return GetCTP().pPr.keepNext.val;
+                }
+                return false;
+
+            }
+        }
+
+        public int IndentationLeftChars 
+        {
+            get
+            {
+                var indentation = GetCTInd(false);
+                return (indentation != null && indentation.IsSetLeftChars()) ? Int32.Parse(indentation.leftChars)
+                        : -1;
+            }
+            set {
+                var indent = GetCTInd(true);
+                indent.leftChars= value.ToString();
+            }
+        }
+        public int IndentationRightChars
+        {
+            get
+            {
+                var indentation = GetCTInd(false);
+                return (indentation != null && indentation.IsSetRightChars()) ? Int32.Parse(indentation.rightChars)
+                        : -1;
+            }
+            set
+            {
+                var indent = GetCTInd(true);
+                indent.rightChars= value.ToString();
+            }
         }
     }
 

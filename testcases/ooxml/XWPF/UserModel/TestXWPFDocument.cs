@@ -75,6 +75,8 @@ namespace TestCases.XWPF.UserModel
             ClassicAssert.IsNotNull(xml.Document);
             ClassicAssert.IsNotNull(xml.Document.body);
             ClassicAssert.IsNotNull(xml.GetStyles());
+            ClassicAssert.IsNotNull(xml.GetTheme());
+            ClassicAssert.AreEqual("Cambria", xml.GetTheme().MajorFont);
         }
 
         [Test]
@@ -252,11 +254,12 @@ namespace TestCases.XWPF.UserModel
             doc.AddPictureData(new byte[18], (int) PictureType.EPS);
             doc.AddPictureData(new byte[19], (int) PictureType.BMP);
             doc.AddPictureData(new byte[20], (int) PictureType.WPG);
+            doc.AddPictureData(new byte[21], (int) PictureType.SVG);
 
-            ClassicAssert.AreEqual(11, doc.AllPictures.Count);
+            ClassicAssert.AreEqual(12, doc.AllPictures.Count);
 
             doc = XWPFTestDataSamples.WriteOutAndReadBack(doc);
-            ClassicAssert.AreEqual(11, doc.AllPictures.Count);
+            ClassicAssert.AreEqual(12, doc.AllPictures.Count);
 
         }
         [Test]
@@ -537,6 +540,33 @@ namespace TestCases.XWPF.UserModel
                     }
                 }
             }
+        }
+
+        [Test]
+        public void CreateTOCOnADocumentWithoutAStylesPart()
+        {
+            XWPFDocument doc = new XWPFDocument();
+            doc.CreateParagraph().CreateRun().SetText("Heading 1");
+
+            doc.CreateTOC();
+
+            XWPFDocument back = XWPFTestDataSamples.WriteOutAndReadBack(doc);
+            ClassicAssert.IsNotNull(back.GetStyles());
+            ClassicAssert.IsTrue(back.GetStyles().StyleExist("TOC1"));
+            ClassicAssert.AreEqual(1, back.BodyElements.Count(e => e is XWPFSDT));
+        }
+
+        [Test]
+        public void CreateTOCReusesAnExistingStylesPart()
+        {
+            XWPFDocument doc = XWPFTestDataSamples.OpenSampleDocument("heading123.docx");
+
+            doc.CreateTOC();
+
+            XWPFDocument back = XWPFTestDataSamples.WriteOutAndReadBack(doc);
+            ClassicAssert.AreEqual(1, back.RelationParts.Count(
+                rp => rp.Relationship.RelationshipType == XWPFRelation.STYLES.Relation));
+            ClassicAssert.IsTrue(back.GetStyles().StyleExist("TOC1"));
         }
     }
 }

@@ -35,9 +35,9 @@ using NPOI.OpenXmlFormats;
 using System.Collections;
 using NPOI.OpenXml4Net.Exceptions;
 using NPOI.SS;
-using System.Globalization;
 using System.Linq;
 using NPOI.POIFS.FileSystem;
+using System.Data;
 
 namespace NPOI.XSSF.UserModel
 {
@@ -211,12 +211,11 @@ namespace NPOI.XSSF.UserModel
             Load(XSSFFactory.GetInstance());
 
             // some broken Workbooks miss this...
-            if (!workbook.IsSetBookViews())
-            {
-                CT_BookViews bvs = workbook.AddNewBookViews();
-                CT_BookView bv = bvs.AddNewWorkbookView();
-                bv.activeTab = (0);
-            }
+            SetBookViewsIfMissing();
+        }
+        public XSSFWorkbook(PackagePart part): this(part.GetInputStream(), true)
+        {
+            
         }
         /**
          * Constructs a XSSFWorkbook object, by buffering the whole stream into memory
@@ -233,20 +232,8 @@ namespace NPOI.XSSF.UserModel
          *   </code></pre>     
          */
         public XSSFWorkbook(Stream fileStream, bool readOnly = false)
-            : base(PackageHelper.Open(fileStream, readOnly))
+            : this(PackageHelper.Open(fileStream, readOnly))
         {
-            BeforeDocumentRead();
-
-            //build a tree of POIXMLDocumentParts, this workbook being the root
-            Load(XSSFFactory.GetInstance());
-
-            // some broken Workbooks miss this...
-            if (!workbook.IsSetBookViews())
-            {
-                CT_BookViews bvs = workbook.AddNewBookViews();
-                CT_BookView bv = bvs.AddNewWorkbookView();
-                bv.activeTab = (0);
-            }
         }
 
         /**
@@ -447,9 +434,7 @@ namespace NPOI.XSSF.UserModel
             CT_WorkbookPr workbookPr = workbook.AddNewWorkbookPr();
             workbookPr.date1904 = (false);
 
-            CT_BookViews bvs = workbook.AddNewBookViews();
-            CT_BookView bv = bvs.AddNewWorkbookView();
-            bv.activeTab = 0;
+            SetBookViewsIfMissing();
             workbook.AddNewSheets();
 
             ExtendedProperties expProps = GetProperties().ExtendedProperties;
@@ -477,6 +462,15 @@ namespace NPOI.XSSF.UserModel
             pivotTables = new List<XSSFPivotTable>();
         }
 
+        private void SetBookViewsIfMissing()
+        {
+            if(!workbook.IsSetBookViews())
+            {
+                CT_BookViews bvs = workbook.AddNewBookViews();
+                CT_BookView bv = bvs.AddNewWorkbookView();
+                bv.activeTab = 0;
+            }
+        }
         /**
          * Create a new SpreadsheetML namespace and Setup the default minimal content
          */
@@ -1183,6 +1177,8 @@ namespace NPOI.XSSF.UserModel
             }
             return null;
         }
+
+        public ISheet this[string name] => GetSheet(name);
 
         /**
          * Get the XSSFSheet object at the given index.
@@ -2454,7 +2450,7 @@ namespace NPOI.XSSF.UserModel
         public bool CellFormulaValidation
         {
             get { return this.cellFormulaValidation; }
-            set { this.cellFormulaValidation = false; }
+            set { this.cellFormulaValidation = value; }
         }
 
         #region IWorkbook Members
@@ -2727,6 +2723,17 @@ namespace NPOI.XSSF.UserModel
         public void Dispose()
         {
             this.Close();
+        }
+
+        public DataSet ToDataSet(bool firstRowAsHeader = false, bool showCalculatedValue = false)
+        {
+            return WorkbookUtil.ToDataSet(this, firstRowAsHeader, showCalculatedValue);
+        }
+
+        public bool ForceFormulaRecalculation
+        {
+            get => GetForceFormulaRecalculation();
+            set => SetForceFormulaRecalculation(value);
         }
     }
 }

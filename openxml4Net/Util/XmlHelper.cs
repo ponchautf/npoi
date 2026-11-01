@@ -119,6 +119,13 @@ namespace NPOI.OpenXml4Net.Util
                 return null;
             return attr.Value;
         }
+
+        public static string ReadString(XmlAttribute attr, string defaultValue)
+        {
+            if (attr == null)
+                return defaultValue;
+            return attr.Value;
+        }
         public static decimal ReadDecimal(XmlAttribute attr)
         {
             if (attr == null)
@@ -331,6 +338,7 @@ namespace NPOI.OpenXml4Net.Util
                 .Replace("\"", "&quot;");//.Replace("'", "&apos;");
         }
 
+        [Obsolete("CDATA content is not entity-decoded, so readers get the encoded text. Write CDATA content as it is and split \"]]>\" across two sections.", true)]
         public static string EncodeCDATAContent(string xml)
         {
             // quick check whether needed
@@ -477,8 +485,13 @@ namespace NPOI.OpenXml4Net.Util
 
         public static sbyte ReadSByte(XmlAttribute attr)
         {
+            return ReadSByte(attr, 0);
+        }
+
+        public static sbyte ReadSByte(XmlAttribute attr, sbyte defaultValue)
+        {
             if (attr == null)
-                return 0;
+                return defaultValue;
 
             sbyte i;
             if (sbyte.TryParse(attr.Value, out i))

@@ -414,7 +414,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
-                XSSFColor clr = new XSSFColor();
+                XSSFColor clr = XSSFColor.From(new CT_Color(), _stylesSource.IndexedColors);
                 clr.Indexed = value;
                 SetBottomBorderColor(clr);
             }
@@ -477,6 +477,16 @@ namespace NPOI.XSSF.UserModel
             return new XSSFDataFormat(_stylesSource).GetFormat((short)idx);
         }
 
+        public string FormatString
+        {
+            get { return GetDataFormatString(); }
+            set
+            {
+                short formatIndex = (short)_stylesSource.PutNumberFormat(value);
+                DataFormat = formatIndex;
+            }
+        }
+
         /// <summary>
         /// Get the background fill color.
         /// Note - many cells are actually filled with a foreground fill, not a background fill
@@ -490,7 +500,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
-                XSSFColor clr = new XSSFColor();
+                XSSFColor clr = XSSFColor.From(new CT_Color(), _stylesSource.IndexedColors);
                 clr.Indexed = (value);
                 SetFillBackgroundColor(clr);
             }
@@ -568,7 +578,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
-                XSSFColor clr = new XSSFColor();
+                XSSFColor clr = XSSFColor.From(new CT_Color(), _stylesSource.IndexedColors);
                 clr.Indexed = (value);
                 SetFillForegroundColor(clr);
             }
@@ -761,7 +771,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
-                XSSFColor clr = new XSSFColor();
+                XSSFColor clr = XSSFColor.From(new CT_Color(), _stylesSource.IndexedColors);
                 clr.Indexed = (value);
                 SetLeftBorderColor(clr);
             }
@@ -850,7 +860,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
-                XSSFColor clr = new XSSFColor();
+                XSSFColor clr = XSSFColor.From(new CT_Color(), _stylesSource.IndexedColors);
                 clr.Indexed = (value);
                 SetRightBorderColor(clr);
             }
@@ -913,7 +923,7 @@ namespace NPOI.XSSF.UserModel
             }
             set
             {
-                XSSFColor clr = new XSSFColor();
+                XSSFColor clr = XSSFColor.From(new CT_Color(), _stylesSource.IndexedColors);
                 clr.Indexed = (value);
                 SetTopBorderColor(clr);
             }

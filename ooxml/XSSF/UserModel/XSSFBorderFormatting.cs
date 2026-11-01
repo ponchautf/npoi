@@ -171,7 +171,7 @@ namespace NPOI.XSSF.UserModel
         {
             get
             {
-                return GetIndexedColor(RightBorderColorColor as XSSFColor);
+                return GetIndexedColor(TopBorderColorColor as XSSFColor);
             }
             set
             {
@@ -436,7 +436,7 @@ namespace NPOI.XSSF.UserModel
 
         private XSSFColor GetColor(CT_BorderPr pr)
         {
-            return pr == null ? null : new XSSFColor(pr.color, _colorMap);
+            return pr == null ? null : XSSFColor.From(pr.color, _colorMap);
         }
         #endregion
     }

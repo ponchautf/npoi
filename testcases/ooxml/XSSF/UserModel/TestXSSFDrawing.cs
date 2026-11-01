@@ -17,6 +17,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;using NUnit.Framework.Legacy;
 using System;
+using System.IO;
 using NPOI.OpenXml4Net.OPC;
 using NPOI.SS.UserModel;
 using NPOI.OpenXmlFormats.Dml;
@@ -26,7 +27,7 @@ using System.Text;
 using NPOI.XSSF;
 using NPOI.XSSF.UserModel;
 using NPOI;
-using SixLabors.ImageSharp;
+using SkiaSharp;
 
 namespace TestCases.XSSF.UserModel
 {
@@ -232,7 +233,7 @@ namespace TestCases.XSSF.UserModel
             XSSFRichTextString rt = new XSSFRichTextString("Test String");
 
             XSSFFont font = wb.CreateFont() as XSSFFont;
-            font.SetColor(new XSSFColor(Color.FromRgb(0, 128, 128)));
+            font.SetColor(new XSSFColor(new SKColor(0, 128, 128), wb.GetStylesSource().IndexedColors));
             font.IsItalic = (true);
             font.IsBold = (true);
             font.Underline = FontUnderlineType.Single;
@@ -252,6 +253,45 @@ namespace TestCases.XSSF.UserModel
                     rPr.solidFill.srgbClr.val));
 
             checkRewrite(wb);
+            wb.Close();
+        }
+
+        /**
+         * Regression test: the txBody element of a spreadsheet shape must be written
+         * in the "xdr" namespace, not "a", otherwise Excel stops rendering the text.
+         */
+        [Test]
+        public void TestTextShapeTxBodyNamespace()
+        {
+            XSSFWorkbook wb = new XSSFWorkbook();
+            XSSFSheet sheet = wb.CreateSheet() as XSSFSheet;
+            XSSFDrawing drawing = sheet.CreateDrawingPatriarch() as XSSFDrawing;
+            XSSFSimpleShape shape = drawing.CreateSimpleShape(new XSSFClientAnchor(0, 0, 0, 0, 2, 2, 3, 4));
+            shape.SetText(new XSSFRichTextString("Test"));
+
+            string tmpFile = Path.GetTempFileName();
+            try
+            {
+                using (FileStream fs = new FileStream(tmpFile, FileMode.Create, FileAccess.Write))
+                    wb.Write(fs);
+                using (OPCPackage pkg = OPCPackage.Open(tmpFile))
+                {
+                    foreach (var part in pkg.GetPartsByContentType(XSSFRelation.DRAWINGS.ContentType))
+                    {
+                        using (Stream s = part.GetInputStream())
+                        using (StreamReader reader = new StreamReader(s, Encoding.UTF8))
+                        {
+                            string xml = reader.ReadToEnd();
+                            ClassicAssert.IsTrue(xml.Contains("<xdr:txBody>"), "expected <xdr:txBody> in drawing.xml but got: " + xml);
+                            ClassicAssert.IsFalse(xml.Contains("<a:txBody>"), "found <a:txBody> with wrong namespace in drawing.xml: " + xml);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                File.Delete(tmpFile);
+            }
             wb.Close();
         }
 
@@ -310,7 +350,7 @@ namespace TestCases.XSSF.UserModel
             XSSFRichTextString rt = new XSSFRichTextString("Test String");
 
             XSSFFont font = wb.CreateFont() as XSSFFont;
-            font.SetColor(new XSSFColor(Color.FromRgb(0, 128, 128)));
+            font.SetColor(new XSSFColor(new SKColor(0, 128, 128), wb.GetStylesSource().IndexedColors));
             font.FontName = ("Arial");
             rt.ApplyFont(font);
 
@@ -343,7 +383,7 @@ namespace TestCases.XSSF.UserModel
             XSSFRichTextString rt = new XSSFRichTextString("Test String");
 
             XSSFFont font = wb.CreateFont() as XSSFFont;
-            font.SetColor(new XSSFColor(Color.FromRgb(0, 255, 255)));
+            font.SetColor(new XSSFColor(new SKColor(0, 255, 255), wb.GetStylesSource().IndexedColors));
             font.FontName = ("Arial");
             rt.ApplyFont(font);
 
@@ -360,7 +400,7 @@ namespace TestCases.XSSF.UserModel
             var clr = runs[0].FontColor;
             ClassicAssert.IsTrue(Arrays.Equals(
                     new int[] { 0, 255, 255 },
-                    new int[] { clr.R, clr.G, clr.B }));
+                    new int[] { clr.Red, clr.Green, clr.Blue }));
 
             checkRewrite(wb);
             wb.Close();
@@ -406,12 +446,12 @@ namespace TestCases.XSSF.UserModel
             XSSFRichTextString rt = new XSSFRichTextString("Test Rich Text String");
 
             XSSFFont font = wb1.CreateFont() as XSSFFont;
-            font.SetColor(new XSSFColor(Color.FromRgb(0, 255, 255)));
+            font.SetColor(new XSSFColor(new SKColor(0, 255, 255), wb1.GetStylesSource().IndexedColors));
             font.FontName = ("Arial");
             rt.ApplyFont(font);
 
             XSSFFont midfont = wb1.CreateFont() as XSSFFont;
-            midfont.SetColor(new XSSFColor(Color.FromRgb(0, 255, 0)));
+            midfont.SetColor(new XSSFColor(new SKColor(0, 255, 0), wb1.GetStylesSource().IndexedColors));
             rt.ApplyFont(5, 14, midfont);	// Set the text "Rich Text" to be green and the default font
 
             XSSFTextParagraph para = shape.AddNewTextParagraph(rt);
@@ -443,7 +483,7 @@ namespace TestCases.XSSF.UserModel
             var clr = runs[0].FontColor;
             ClassicAssert.IsTrue(Arrays.Equals(
                     new int[] { 0, 255, 255 },
-                    new int[] { clr.R, clr.G, clr.B }));
+                    new int[] { clr.Red, clr.Green, clr.Blue }));
 
             // second run properties        
             ClassicAssert.AreEqual("Rich Text", runs[1].Text);
@@ -452,7 +492,7 @@ namespace TestCases.XSSF.UserModel
             clr = runs[1].FontColor;
             ClassicAssert.IsTrue(Arrays.Equals(
                     new int[] { 0, 255, 0 },
-                    new int[] { clr.R, clr.G, clr.B }));
+                    new int[] { clr.Red, clr.Green, clr.Blue }));
 
             // third run properties
             ClassicAssert.AreEqual(" String", runs[2].Text);
@@ -460,7 +500,7 @@ namespace TestCases.XSSF.UserModel
             clr = runs[2].FontColor;
             ClassicAssert.IsTrue(Arrays.Equals(
                     new int[] { 0, 255, 255 },
-                    new int[] { clr.R, clr.G, clr.B }));
+                    new int[] { clr.Red, clr.Green, clr.Blue }));
 
             checkRewrite(wb2);
             wb2.Close();
@@ -605,17 +645,17 @@ namespace TestCases.XSSF.UserModel
             var clr = paras[0].TextRuns[0].FontColor;
             ClassicAssert.IsTrue(Arrays.Equals(
                     new int[] { 255, 0, 0 },
-                    new int[] { clr.R, clr.G, clr.B }));
+                    new int[] { clr.Red, clr.Green, clr.Blue }));
 
             clr = paras[1].TextRuns[0].FontColor;
             ClassicAssert.IsTrue(Arrays.Equals(
                     new int[] { 0, 255, 0 },
-                    new int[] { clr.R, clr.G, clr.B }));
+                    new int[] { clr.Red, clr.Green, clr.Blue }));
 
             clr = paras[2].TextRuns[0].FontColor;
             ClassicAssert.IsTrue(Arrays.Equals(
                     new int[] { 0, 0, 255 },
-                    new int[] { clr.R, clr.G, clr.B }));
+                    new int[] { clr.Red, clr.Green, clr.Blue }));
 
             checkRewrite(wb);
             wb.Close();

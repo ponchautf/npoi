@@ -38,7 +38,7 @@ namespace NPOI.OpenXml4Net.OPC.Internal
             else
                 zos = new ZipOutputStream(out1);
 
-            ZipEntry partEntry = new ZipEntry(CONTENT_TYPES_PART_NAME);
+            ZipEntry partEntry = new ZipEntry(CONTENT_TYPES_PART_NAME) { DateTime = ZipHelper.ZipEntryTimestamp };
             try
             {
                 // Referenced in ZIP
@@ -46,22 +46,23 @@ namespace NPOI.OpenXml4Net.OPC.Internal
                 // Saving data in the ZIP file
 
                 StreamHelper.SaveXmlInStream(content, out1);
-                using MemoryStream ins = new MemoryStream();
+                // useless reading from empty stream
+                //using MemoryStream ins = new MemoryStream();
 
-                byte[] buff = new byte[ZipHelper.READ_WRITE_FILE_BUFFER_SIZE];
-                while(true)
-                {
-                    int resultRead = ins.Read(buff, 0, ZipHelper.READ_WRITE_FILE_BUFFER_SIZE);
-                    if(resultRead == 0)
-                    {
-                        // end of file reached
-                        break;
-                    }
-                    else
-                    {
-                        zos.Write(buff, 0, resultRead);
-                    }
-                }
+                //byte[] buff = new byte[ZipHelper.READ_WRITE_FILE_BUFFER_SIZE];
+                //while(true)
+                //{
+                //    int resultRead = ins.Read(buff, 0, ZipHelper.READ_WRITE_FILE_BUFFER_SIZE);
+                //    if(resultRead == 0)
+                //    {
+                //        // end of file reached
+                //        break;
+                //    }
+                //    else
+                //    {
+                //        zos.Write(buff, 0, resultRead);
+                //    }
+                //}
 
                 zos.CloseEntry();
             }

@@ -17,12 +17,13 @@
 
 namespace NPOI.SS.UserModel
 {
+    using NPOI.SS.Formula.UDF;
+    using NPOI.Util;
     using System;
     using System.Collections;
-    using System.IO;
-    using NPOI.SS.Formula.UDF;
     using System.Collections.Generic;
-    using NPOI.Util;
+    using System.Data;
+    using System.IO;
 
     /// <summary>
     /// High level interface of a Excel workbook.  This is the first object most users 
@@ -445,5 +446,16 @@ namespace NPOI.SS.UserModel
         /// <return>the index of the added ole object, i.e. the storage id</return>
         /// <exception cref="IOException">if the object can't be embedded</exception>
         int AddOlePackage(byte[] oleData, String label, String fileName, String command);
+
+        DataSet ToDataSet(bool firstRowAsHeader = false, bool showCalculatedValue = false);
+
+        /// <summary>
+        /// Gets a sheet by name
+        /// </summary>
+        /// <param name="name">The sheet name</param>
+        /// <returns>The sheet or null if not found</returns>
+        ISheet this[string name] { get; }
+
+        bool ForceFormulaRecalculation { get; set; }
     }
 }

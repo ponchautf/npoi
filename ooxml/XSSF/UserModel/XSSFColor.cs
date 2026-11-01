@@ -21,8 +21,7 @@ using System.Text;
 using NPOI.Util;
 using NPOI.SS.UserModel;
 using NPOI.OpenXmlFormats.Spreadsheet;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 using NPOI.OOXML.XSSF.UserModel;
 
 namespace NPOI.XSSF.UserModel
@@ -38,14 +37,16 @@ namespace NPOI.XSSF.UserModel
         private IIndexedColorMap indexedColorMap;
 
         /**
-         * Create an instance of XSSFColor from the supplied XML bean
+         * @param color
+         * @param map
+         * @return null if color is null, new instance otherwise
          */
-        [Obsolete("Remove it at NPOI 2.8.0")]
-        public XSSFColor(CT_Color color)
-            : this(color, new DefaultIndexedColorMap())
+        public static XSSFColor From(CT_Color color, IIndexedColorMap map)
         {
-
+            return color == null ? null : new XSSFColor(color, map);
         }
+
+        [Obsolete("we want to have the indexed map, and all calling contexts have access to it. Remove it at POI 4.2.")]
         public XSSFColor(CT_Color color, IIndexedColorMap map)
         {
             this.ctColor = color;
@@ -54,22 +55,26 @@ namespace NPOI.XSSF.UserModel
         /**
          * Create an new instance of XSSFColor
          */
+        [Obsolete("we want to have the indexed map, and all calling contexts have access to it.  Remove it at POI 4.2.")]
         public XSSFColor()
-            : this(new CT_Color(), null)
+            : this(new CT_Color(), new DefaultIndexedColorMap())
         {
         }
 
-        public XSSFColor(Color clr)
-            : this()
+        public XSSFColor(IIndexedColorMap colorMap)
+            : this(new CT_Color(), colorMap)
         {
-            var c = clr.ToPixel<Rgb24>();
-            ctColor.SetRgb(c.R, c.G, c.B);
         }
 
-        public XSSFColor(Rgb24 clr)
-            : this() {
+        public XSSFColor(SKColor clr)
+            : this(clr, new DefaultIndexedColorMap())
+        {
+        }
 
-            ctColor.SetRgb(clr.R, clr.G, clr.B);
+        public XSSFColor(SKColor clr, IIndexedColorMap map)
+            : this(map) {
+
+            ctColor.SetRgb(clr.Red, clr.Green, clr.Blue);
         }
 
         public XSSFColor(byte[] rgb, IIndexedColorMap colorMap)

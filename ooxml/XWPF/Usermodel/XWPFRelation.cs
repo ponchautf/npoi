@@ -26,6 +26,8 @@ namespace NPOI.XWPF.UserModel
     public class XWPFRelation : POIXMLRelation
     {
 
+        private static String NS_DRAWINGML = XSSF.UserModel.XSSFRelation.NS_DRAWINGML;
+
         /**
          * A map to lookup POIXMLRelation by its relation type
          */
@@ -109,7 +111,13 @@ namespace NPOI.XWPF.UserModel
             "application/vnd.openxmlformats-officedocument.theme+xml",
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme",
             "/word/theme/theme#.xml",
-            null
+            typeof(XWPFTheme)
+        );
+        public static XWPFRelation CHART = new XWPFRelation(
+            "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+            "/word/charts/chart#.xml",
+           typeof(XWPFChart)
         );
         public static XWPFRelation HYPERLINK = new XWPFRelation(
                 null,
@@ -205,6 +213,13 @@ namespace NPOI.XWPF.UserModel
                 "/word/media/image#.wpg",
                 typeof(XWPFPictureData)
         );
+        public static XWPFRelation HDPHOTO_WDP = new XWPFRelation(
+            "image/vnd.ms-photo",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+            "/ppt/media/hdphoto#.wdp",
+            typeof(XWPFPictureData)
+    );
+
         public static XWPFRelation IMAGE_SVG = new XWPFRelation(
                 "image/svg",
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
@@ -219,6 +234,18 @@ namespace NPOI.XWPF.UserModel
               typeof(XWPFPictureData)
         );
 
+        public static XWPFRelation WORKBOOK = new XWPFRelation(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            POIXMLDocument.PACK_OBJECT_REL_TYPE,
+            "/word/embeddings/Microsoft_Excel_Worksheet#.xlsx",
+            typeof(XSSF.UserModel.XSSFWorkbook)
+        );
+        public static XWPFRelation CHART_SHEET = new XWPFRelation(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+           POIXMLDocument.PACK_OBJECT_REL_TYPE,
+            "/word/embeddings/Microsoft_Excel_Worksheet#.xlsx",
+           typeof(XWPFChartData)
+        );
 
         private XWPFRelation(String type, String rel, String defaultName, Type cls)
             : base(type, rel, defaultName, cls)

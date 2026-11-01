@@ -105,6 +105,7 @@ namespace NPOI.SS.Formula.Atp
             r(m, "CUBEVALUE", null);
             r(m, "CUMIPMT", null);
             r(m, "CUMPRINC", null);
+            r(m, "DAYS", Days.Instance);
             r(m, "DEC2BIN", Dec2Bin.instance);
             r(m, "DEC2HEX", Dec2Hex.instance);
             r(m, "DEC2OCT", null);
@@ -177,6 +178,7 @@ namespace NPOI.SS.Formula.Atp
             r(m, "RECEIVED", null);
             r(m, "RTD", null);
             r(m, "SERIESSUM", null);
+            r(m, "SHEET", Sheet.instance);
             r(m, "SQRTPI", null);
             r(m, "SUMIFS", Sumifs.instance);
             r(m, "SWITCH", Switch.instance);

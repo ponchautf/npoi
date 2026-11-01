@@ -85,7 +85,6 @@ namespace TestCases.XSSF.UserModel
             IWorkbook workbook = XSSFTestDataSamples.OpenSampleWorkbook("54071.xlsx");
             ISheet sheet = workbook.GetSheetAt(0);
             int rows = sheet.PhysicalNumberOfRows;
-            Console.WriteLine(">> file rows is:" + (rows - 1) + " <<");
             IRow title = sheet.GetRow(0);
 
             DateTime? prev = null;
@@ -100,7 +99,7 @@ namespace TestCases.XSSF.UserModel
                     {
                         // here the output will produce ...59 or ...58 for the rows, probably POI is
                         // doing some different rounding or some other small difference...
-                        Console.WriteLine("==Time:" + cell.DateCellValue);
+                        //Console.WriteLine("==Time:" + cell.DateCellValue);
                         if (prev != null)
                         {
                             ClassicAssert.AreEqual(prev, cell.DateCellValue);
@@ -354,6 +353,49 @@ namespace TestCases.XSSF.UserModel
             //why concate ".0"? There is no ".0" in excel.
             ClassicAssert.AreEqual(contents, cell.ToString(), "Did not have expected contents at rownum " + rowNum);
             //ClassicAssert.AreEqual(contents + ".0", cell.ToString(), "Did not have expected contents at rownum " + rowNum);
+        }
+
+        [Test]
+        public void Bug57423_shiftRowsByLargeOffset()
+        {
+            XSSFWorkbook wb = new XSSFWorkbook();
+            try
+            {
+                ISheet sh = wb.CreateSheet();
+                sh.CreateRow(0).CreateCell(0).SetCellValue("a");
+                sh.CreateRow(1).CreateCell(0).SetCellValue("b");
+                sh.CreateRow(2).CreateCell(0).SetCellValue("c");
+                sh.ShiftRows(0, 1, 3);
+
+                XSSFWorkbook wbBack = XSSFTestDataSamples.WriteOutAndReadBack(wb);
+
+                assertThatRowsInAscendingOrder(wb);
+                assertThatRowsInAscendingOrder(wbBack);
+
+                //wbBack.write(out);
+                // Excel reports that the workbook is corrupt because the rows are not in ascending order
+                // LibreOffice doesn't complain when rows are not in ascending order
+
+                wbBack.Close();
+            }
+            catch(Exception e)
+            {
+                wb.Close();
+            }
+        }
+
+        private void assertThatRowsInAscendingOrder(XSSFWorkbook wb)
+        {
+            // Check that CTRows are stored in ascending order of row index
+            long maxSeenRowNum = 0; //1-based
+            XSSFSheet sheet = wb.GetSheetAt(0) as XSSFSheet;
+            foreach(CT_Row ctRow in sheet.GetCTWorksheet().sheetData.GetRowArray())
+            {
+                long rowNum = ctRow.r; //1-based
+                ClassicAssert.IsTrue(rowNum > maxSeenRowNum, 
+                    "Row " + rowNum + " (1-based) is not in ascending order; previously saw " + maxSeenRowNum);
+                maxSeenRowNum = rowNum;
+            }
         }
     }
 }

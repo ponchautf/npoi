@@ -19,7 +19,6 @@ namespace NPOI.SS.Formula
 {
 
     using System;
-    using System.Collections;
     using System.Collections.Generic;
     using System.Globalization;
     using System.Text; 
@@ -32,7 +31,6 @@ namespace NPOI.SS.Formula
     using NPOI.SS.UserModel;
     using NPOI.SS.Util;
     using NPOI.Util;
-    using SixLabors.Fonts.Unicode;
 
     /// <summary>
     /// Specific exception thrown when a supplied formula does not Parse properly.
@@ -221,18 +219,18 @@ namespace NPOI.SS.Formula
         /** Recognize an Alpha Character */
         private static bool IsAlpha(int c)
         {
-            return CodePoint.IsLetter(new CodePoint(c)) || c == '$' || c == '_';
+            return char.IsLetter(char.ConvertFromUtf32(c), 0) || c == '$' || c == '_';
         }
 
         private static bool IsLetter(int c)
         {
-            return CodePoint.IsLetter(new CodePoint(c));
+            return char.IsLetter(char.ConvertFromUtf32(c), 0);
         }
 
         /** Recognize a Decimal Digit */
         private static bool IsDigit(int c)
         {
-            return CodePoint.IsDigit(new CodePoint(c));
+            return char.IsDigit(char.ConvertFromUtf32(c), 0);
         }
 
         /** Recognize an Alphanumeric */
@@ -249,7 +247,7 @@ namespace NPOI.SS.Formula
 
         private static bool IsLetterOrDigit(int c)
         {
-            return CodePoint.IsLetterOrDigit(new CodePoint(c));
+            return char.IsLetterOrDigit(char.ConvertFromUtf32(c), 0);
         }
 
         /** Skip Over Leading White Space */
@@ -451,7 +449,9 @@ namespace NPOI.SS.Formula
             if (tkn is AbstractFunctionPtg afp)
             {
                 byte returnClass = afp.DefaultOperandClass;
-                return Ptg.CLASS_REF == returnClass;
+                //CLASS_VALUE was added as valid to support example 6 in
+                //https://support.microsoft.com/en-us/office/xlookup-function-b7fd680e-6d10-43e6-84f9-88eae8bf5929
+                return Ptg.CLASS_REF == returnClass || Ptg.CLASS_VALUE == returnClass;
             }
             if (tkn is ValueOperatorPtg)
             {
@@ -1799,7 +1799,7 @@ namespace NPOI.SS.Formula
         private ParseNode[] Arguments()
         {
             //average 2 args per Function
-            ArrayList temp = new ArrayList(2);
+            List<ParseNode> temp = new List<ParseNode>(2);
             SkipWhite();
             if (look == ')')
             {
@@ -1835,7 +1835,7 @@ namespace NPOI.SS.Formula
                     throw expected("',' or ')'");
                 }
             }
-            ParseNode[] result = (ParseNode[])temp.ToArray(typeof(ParseNode));
+            ParseNode[] result = temp.ToArray();
             return result;
         }
 
@@ -1990,7 +1990,7 @@ namespace NPOI.SS.Formula
 
         private Object[] ParseArrayRow()
         {
-            ArrayList temp = new ArrayList();
+            List<object> temp = new List<object>();
             while (true)
             {
                 temp.Add(ParseArrayItem());
@@ -2010,9 +2010,7 @@ namespace NPOI.SS.Formula
                 break;
             }
 
-            Object[] result = new Object[temp.Count];
-            result = temp.ToArray();
-            return result;
+            return temp.ToArray();
         }
 
         private Object ParseArrayItem()

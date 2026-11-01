@@ -100,7 +100,7 @@ namespace NPOI.HSSF.UserModel
             Hashtable coordinates = new Hashtable(tailRecords.Count);
             foreach (NoteRecord rec in tailRecords.Values)
             {
-                String noteRef = new CellReference(rec.Row, rec.Column).FormatAsString(); // A1-style notation
+                String noteRef = new CellReference(rec.Row, rec.Column, true, true).FormatAsString(); // A1-style notation
                 if (coordinates.Contains(noteRef))
                 {
                     throw new InvalidOperationException("found multiple cell comments for cell " + noteRef);
@@ -539,11 +539,6 @@ namespace NPOI.HSSF.UserModel
         public IClientAnchor CreateAnchor(int dx1, int dy1, int dx2, int dy2, int col1, int row1, int col2, int row2)
         {
             return new HSSFClientAnchor(dx1, dy1, dx2, dy2, (short)col1, row1, (short)col2, row2);
-        }
-
-        public IChart CreateChart(IClientAnchor anchor)
-        {
-            throw new RuntimeException("NotImplemented");
         }
         /**
      * create shape tree from existing escher records tree

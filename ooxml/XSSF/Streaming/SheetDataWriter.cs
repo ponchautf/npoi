@@ -40,18 +40,20 @@ namespace NPOI.XSSF.Streaming
         public int NumberOfCellsOfLastFlushedRow { get; set; } // meaningful only of _numberOfFlushedRows>0
         public int NumberLastFlushedRow = -1; // meaningful only of _numberOfFlushedRows>0
 
+        private static readonly int DefaultBufferSize = 131072;
+
         /**
          * Table of strings shared across this workbook.
          * If two cells contain the same string, then the cell value is the same index into SharedStringsTable
          */
         private readonly SharedStringsTable _sharedStringSource;
         private readonly StreamWriter _out;
-
+        private static readonly Encoding Utf8WithoutBom = new UTF8Encoding(false);
         public SheetDataWriter()
         {
             TemporaryFileInfo = CreateTempFile();
             OutputStream = CreateWriter(TemporaryFileInfo);
-            _out = new StreamWriter(OutputStream);
+            _out = new StreamWriter(OutputStream, Utf8WithoutBom, DefaultBufferSize);
         }
         public SheetDataWriter(SharedStringsTable sharedStringsTable) : this()
         {
@@ -79,7 +81,8 @@ namespace NPOI.XSSF.Streaming
         public virtual Stream CreateWriter(FileInfo fd)
         {
 
-            FileStream fos = new FileStream(fd.FullName, FileMode.OpenOrCreate, FileAccess.ReadWrite);
+            FileStream fos = new FileStream(fd.FullName, FileMode.OpenOrCreate, FileAccess.ReadWrite, 
+                FileShare.ReadWrite | FileShare.Delete, DefaultBufferSize);
             Stream outputStream;
             try
             {
@@ -138,7 +141,8 @@ namespace NPOI.XSSF.Streaming
          */
         public Stream GetWorksheetXmlInputStream()
         {
-            FileStream fis = new FileStream(TemporaryFileInfo.FullName, FileMode.OpenOrCreate, FileAccess.ReadWrite);
+            FileStream fis = new FileStream(TemporaryFileInfo.FullName, FileMode.OpenOrCreate, FileAccess.ReadWrite,
+                FileShare.ReadWrite | FileShare.Delete, DefaultBufferSize);
             try
             {
                 return DecorateInputStream(fis);

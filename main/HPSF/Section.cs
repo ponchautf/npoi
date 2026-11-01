@@ -34,7 +34,8 @@ namespace NPOI.HPSF
     /// </summary>
     public class Section
     {
-
+        //arbitrarily selected; may need to increase
+        private static int MAX_RECORD_LENGTH = 100_000;
         /// <summary>
         /// <para>
         /// Maps property IDs to section-private PID strings. These
@@ -67,7 +68,7 @@ namespace NPOI.HPSF
         /// <summary>
         /// This section's properties.
         /// </summary>
-        private IDictionary<long, Property> properties = new Dictionary<long, Property>();
+        private Dictionary<long, Property> properties = new Dictionary<long, Property>();
 
         /// <summary>
         /// This member is <c>true</c> if the last call to {@link
@@ -809,7 +810,7 @@ namespace NPOI.HPSF
              * section. */
             if (sectionBytes.Position > 0)
             {
-                sectionBytes.WriteTo(out1);
+                out1.Write(sectionBytes.ToByteArray(), 0, (int)sectionBytes.Length);
                 return (int)sectionBytes.Position;
             }
 
@@ -941,7 +942,7 @@ namespace NPOI.HPSF
 
                 try 
                 {
-                    byte[] buf = new byte[nrBytes];
+                    byte[] buf = IOUtils.SafelyAllocate(nrBytes, MAX_RECORD_LENGTH);
                     leis.ReadFully(buf, 0, nrBytes);
                     String str = CodePageUtil.GetStringFromCodePage(buf, 0, nrBytes, cp);
 

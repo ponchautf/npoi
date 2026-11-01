@@ -15,14 +15,12 @@
    limitations under the License.
 ==================================================================== */
 
-using System.Collections.Generic;
-
 namespace NPOI.SS.Formula
 {
 
     using System;
     using System.Text;
-    using System.Collections;
+    using System.Collections.Generic;
     using NPOI.SS.Util;
 
     public class BookSheetKey
@@ -62,15 +60,19 @@ namespace NPOI.SS.Formula
             private int _firstColumnIndex;
             private int _lastColumnIndex;
             private BlankCellRectangleGroup _currentRectangleGroup;
+            private int _lastDefinedRow;
 
-            public BlankCellSheetGroup()
+            public BlankCellSheetGroup(int lastDefinedRow)
             {
                 _rectangleGroups = [];
                 _currentRowIndex = -1;
+                _lastDefinedRow = lastDefinedRow;
             }
 
             public void AddCell(int rowIndex, int columnIndex)
             {
+                if(rowIndex > _lastDefinedRow)
+                    return;
                 if (_currentRowIndex == -1)
                 {
                     _currentRowIndex = rowIndex;
@@ -107,6 +109,8 @@ namespace NPOI.SS.Formula
 
             public bool ContainsCell(int rowIndex, int columnIndex)
             {
+                if(rowIndex > _lastDefinedRow)
+                    return true;
                 for (int i = _rectangleGroups.Count - 1; i >= 0; i--)
                 {
                     BlankCellRectangleGroup bcrg = (BlankCellRectangleGroup)_rectangleGroups[i];
@@ -196,36 +200,34 @@ namespace NPOI.SS.Formula
             }
         }
 
-        private readonly Hashtable _sheetGroupsByBookSheet;
+        private readonly Dictionary<BookSheetKey, BlankCellSheetGroup> _sheetGroupsByBookSheet;
 
         public FormulaUsedBlankCellSet()
         {
-            _sheetGroupsByBookSheet = new Hashtable();
+            _sheetGroupsByBookSheet = new Dictionary<BookSheetKey, BlankCellSheetGroup>();
         }
 
-        public void AddCell(int bookIndex, int sheetIndex, int rowIndex, int columnIndex)
+        public void AddCell(IEvaluationWorkbook evalWorkbook, int bookIndex, int sheetIndex, int rowIndex, int columnIndex)
         {
-            BlankCellSheetGroup sbcg = GetSheetGroup(bookIndex, sheetIndex);
+            BlankCellSheetGroup sbcg = GetSheetGroup(evalWorkbook, bookIndex, sheetIndex);
             sbcg.AddCell(rowIndex, columnIndex);
         }
 
-        private BlankCellSheetGroup GetSheetGroup(int bookIndex, int sheetIndex)
+        private BlankCellSheetGroup GetSheetGroup(IEvaluationWorkbook evalWorkbook, int bookIndex, int sheetIndex)
         {
             BookSheetKey key = new BookSheetKey(bookIndex, sheetIndex);
 
-            BlankCellSheetGroup result = (BlankCellSheetGroup)_sheetGroupsByBookSheet[key];
-            if (result == null)
+            if (!_sheetGroupsByBookSheet.TryGetValue(key, out BlankCellSheetGroup result))
             {
-                result = new BlankCellSheetGroup();
-                _sheetGroupsByBookSheet[key]= result;
+                result = new BlankCellSheetGroup(evalWorkbook.GetSheet(sheetIndex).LastRowNum);
+                _sheetGroupsByBookSheet[key] = result;
             }
             return result;
         }
 
         public bool ContainsCell(BookSheetKey key, int rowIndex, int columnIndex)
         {
-            BlankCellSheetGroup bcsg = (BlankCellSheetGroup)_sheetGroupsByBookSheet[key];
-            if (bcsg == null)
+            if (!_sheetGroupsByBookSheet.TryGetValue(key, out BlankCellSheetGroup bcsg))
             {
                 return false;
             }

@@ -51,12 +51,6 @@ namespace TestCases.XSSF.UserModel
 
         }
 
-        //[Test]
-        //TODO column styles are not yet supported by XSSF
-        public override void DefaultColumnStyle()
-        {
-            base.DefaultColumnStyle();
-        }
         [Test]
         public void TestTestGetSetMargin()
         {
@@ -446,8 +440,83 @@ namespace TestCases.XSSF.UserModel
             workbook.Close();
         }
 
+        /// <summary>
+        /// Regression test for GitHub issue: AutoSizeColumn only resizes one column
+        /// when called on multiple columns of an existing workbook (with pre-existing column
+        /// definitions). The root cause was that GetColumnHelper().SetColBestFit() triggered
+        /// CleanColumns() which orphaned CT_Col objects tracked in _columns, causing width
+        /// changes to be lost for all columns after the first AutoSizeColumn call.
+        /// </summary>
         [Test]
-        [Platform("Win")]
+        public void TestAutoSizeColumnMultipleColumns_AllColumnsResized()
+        {
+            // Create and save a workbook with data in 3 columns so it has column definitions
+            XSSFWorkbook initialWorkbook = new XSSFWorkbook();
+            XSSFSheet initialSheet = (XSSFSheet)initialWorkbook.CreateSheet("Sheet1");
+
+            IRow headerRow = initialSheet.CreateRow(0);
+            headerRow.CreateCell(0).SetCellValue("Name");
+            headerRow.CreateCell(1).SetCellValue("Quantity");
+            headerRow.CreateCell(2).SetCellValue("Price Date");
+
+            for (int r = 1; r <= 5; r++)
+            {
+                IRow row = initialSheet.CreateRow(r);
+                row.CreateCell(0).SetCellValue("Row " + r);
+                row.CreateCell(1).SetCellValue(r * 1.0);
+                row.CreateCell(2).SetCellValue(r * 1.5);
+            }
+
+            // Save and reload to simulate opening an existing workbook
+            MemoryStream stream1 = new MemoryStream();
+            initialWorkbook.Write(stream1, true);
+            initialWorkbook.Close();
+
+            stream1.Position = 0;
+            XSSFWorkbook workbook = new XSSFWorkbook(stream1);
+            XSSFSheet sheet = (XSSFSheet)workbook.GetSheet("Sheet1");
+
+            // AutoSize all 3 columns - the bug was that only the first column was actually resized
+            sheet.AutoSizeColumn(0);
+            sheet.AutoSizeColumn(1);
+            sheet.AutoSizeColumn(2);
+
+            // All 3 columns must have been given an explicit width by AutoSizeColumn
+            ClassicAssert.IsNotNull(sheet.GetColumn(0), "Column 0 should have an explicit width after AutoSizeColumn");
+            ClassicAssert.IsNotNull(sheet.GetColumn(1), "Column 1 should have an explicit width after AutoSizeColumn");
+            ClassicAssert.IsNotNull(sheet.GetColumn(2), "Column 2 should have an explicit width after AutoSizeColumn");
+
+            // Capture widths immediately after auto-sizing (before write/read)
+            double width0Before = sheet.GetColumnWidth(0);
+            double width1Before = sheet.GetColumnWidth(1);
+            double width2Before = sheet.GetColumnWidth(2);
+
+            // Save and reload to verify widths are persisted
+            MemoryStream stream2 = new MemoryStream();
+            workbook.Write(stream2, true);
+            workbook.Close();
+
+            stream2.Position = 0;
+            XSSFWorkbook reloaded = new XSSFWorkbook(stream2);
+            XSSFSheet reloadedSheet = (XSSFSheet)reloaded.GetSheet("Sheet1");
+
+            // All 3 column objects should still exist after write/read
+            ClassicAssert.IsNotNull(reloadedSheet.GetColumn(0), "Column 0 should still exist after write/read");
+            ClassicAssert.IsNotNull(reloadedSheet.GetColumn(1), "Column 1 should still exist after write/read");
+            ClassicAssert.IsNotNull(reloadedSheet.GetColumn(2), "Column 2 should still exist after write/read");
+
+            // All widths should be preserved after write/read cycle
+            ClassicAssert.AreEqual(width0Before, reloadedSheet.GetColumnWidth(0),
+                "Column 0 width should be preserved after write/read");
+            ClassicAssert.AreEqual(width1Before, reloadedSheet.GetColumnWidth(1),
+                "Column 1 width should be preserved after write/read");
+            ClassicAssert.AreEqual(width2Before, reloadedSheet.GetColumnWidth(2),
+                "Column 2 width should be preserved after write/read");
+
+            reloaded.Close();
+        }
+
+        [Test]
         public void TestAutoSizeRow()
         {
             XSSFWorkbook workbook = new XSSFWorkbook();
@@ -465,6 +534,30 @@ namespace TestCases.XSSF.UserModel
 
             ClassicAssert.AreNotEqual(100, row.Height);
             ClassicAssert.AreEqual(540, row.Height);
+
+            workbook.Close();
+        }
+
+        [Test]
+        public void TestAutoSizeRowWithWrapText()
+        {
+            XSSFWorkbook workbook = new XSSFWorkbook();
+            XSSFSheet sheet = (XSSFSheet)workbook.CreateSheet("Sheet 1");
+
+            IRow row = sheet.CreateRow(0);
+            ICell cell = row.CreateCell(0);
+            cell.SetCellValue("This is a very long text that should wrap to multiple lines when auto-sized");
+            ICellStyle style = workbook.CreateCellStyle();
+            style.WrapText = true;
+            cell.CellStyle = style;
+            sheet.SetColumnWidth(0, 10 * 256);
+
+            short originalHeight = (short)(12 * 20);
+            row.Height = originalHeight;
+
+            sheet.AutoSizeRow(row.RowNum);
+
+            ClassicAssert.GreaterOrEqual(row.Height, originalHeight * 2, "Row height should be at least 2x for wrapped text");
 
             workbook.Close();
         }
@@ -545,6 +638,50 @@ namespace TestCases.XSSF.UserModel
             ClassicAssert.AreEqual(0, sheet.NumMergedRegions);
             ClassicAssert.IsNull(sheet.GetCTWorksheet().mergeCells, " CTMergeCells should be deleted After removing the last merged " +
                     "region on the sheet.");
+
+            workbook.Close();
+        }
+
+        [Test]
+        public void TestMergedRegionsCacheReturnsFreshList()
+        {
+            // Verify that mutating the returned list does not corrupt the cache
+            XSSFWorkbook workbook = new XSSFWorkbook();
+            XSSFSheet sheet = (XSSFSheet)workbook.CreateSheet();
+            sheet.AddMergedRegion(new CellRangeAddress(0, 1, 0, 1));
+            sheet.AddMergedRegion(new CellRangeAddress(2, 3, 2, 3));
+
+            var regions1 = sheet.MergedRegions;
+            ClassicAssert.AreEqual(2, regions1.Count);
+
+            // Mutate the returned list — this should NOT affect subsequent calls
+            regions1.Add(new CellRangeAddress(10, 11, 10, 11));
+            regions1.Clear();
+
+            var regions2 = sheet.MergedRegions;
+            ClassicAssert.AreEqual(2, regions2.Count, "Cache should not be corrupted by mutating a previously returned list");
+            ClassicAssert.AreEqual("A1:B2", regions2[0].FormatAsString());
+            ClassicAssert.AreEqual("C3:D4", regions2[1].FormatAsString());
+
+            workbook.Close();
+        }
+
+        [Test]
+        public void TestRemoveMergedRegionsOnEmptySheet()
+        {
+            // Verify RemoveMergedRegions on a sheet with no merge cells does not throw
+            // and does not leave stale cache state
+            XSSFWorkbook workbook = new XSSFWorkbook();
+            XSSFSheet sheet = (XSSFSheet)workbook.CreateSheet();
+
+            // Call RemoveMergedRegions when there are no merged regions at all
+            sheet.RemoveMergedRegions(new List<int> { 0, 1 });
+            ClassicAssert.AreEqual(0, sheet.NumMergedRegions);
+
+            // Now add some regions and verify the cache works correctly after the no-op remove
+            sheet.AddMergedRegion(new CellRangeAddress(0, 1, 0, 1));
+            ClassicAssert.AreEqual(1, sheet.NumMergedRegions);
+            ClassicAssert.AreEqual("A1:B2", sheet.MergedRegions[0].FormatAsString());
 
             workbook.Close();
         }
@@ -2404,10 +2541,23 @@ namespace TestCases.XSSF.UserModel
         [Test]
         public void TestReadFails()
         {
+            // With lazy loading, OnDocumentRead() is a no-op and does not parse
+            // sheet.xml immediately. Parsing is deferred to first content access.
+            // A newly created sheet already has _worksheetLoaded=true, so
+            // OnDocumentRead() on it is simply a no-op (no exception thrown).
             XSSFWorkbook wb = new XSSFWorkbook();
             XSSFSheet sheet = wb.CreateSheet() as XSSFSheet;
+            var originalValue = XSSFSheet.EnableLazyLoading;
+            try
+            {
+                XSSFSheet.EnableLazyLoading = false;
 
-            Assert.Throws<POIXMLException>(() => { sheet.OnDocumentRead(); });
+                Assert.Throws<POIXMLException>(() => { sheet.OnDocumentRead(); });
+            }
+            finally
+            {
+                XSSFSheet.EnableLazyLoading = originalValue;
+            }
 
             wb.Close();
         }
@@ -2484,7 +2634,7 @@ namespace TestCases.XSSF.UserModel
             ClassicAssert.AreEqual("J7", new CellReference(cell).FormatAsString());
             ClassicAssert.AreEqual(CellType.Formula, cell.CellType, "[Cell Formula] J7 cell type");
             ClassicAssert.AreEqual("5+2", cell.CellFormula, "[Cell Formula] J7 cell formula");
-            Console.WriteLine("Cell formula evaluation currently unsupported");
+            //Console.WriteLine("Cell formula evaluation currently unsupported");
 
             // Cell Formula with Reference
             // Formula row references should be adjusted by destRowNum-srcRowNum
@@ -2511,7 +2661,7 @@ namespace TestCases.XSSF.UserModel
 
             // Array Formula
             cell = CellUtil.GetCell(destRow, col++);
-            Console.WriteLine("Array formulas currently unsupported");
+            //Console.WriteLine("Array formulas currently unsupported");
             // FIXME: Array Formula set with Sheet.setArrayFormula() instead of cell.setFormula()
             /*
             ClassicAssert.AreEqual("[Array Formula] N7 cell type", CellType.Formula, cell.CellType);
@@ -2926,10 +3076,8 @@ namespace TestCases.XSSF.UserModel
                 ClassicAssert.AreEqual(expected, (wb.GetSheet("indexedRed") as XSSFSheet).TabColor);
 
                 // test regular-colored (non-indexed, ARGB) sheet
-                expected = new XSSFColor
-                {
-                    ARGBHex = "FF7F2700"
-                };
+                expected = XSSFColor.From(new CT_Color(), wb.GetStylesSource().IndexedColors);
+                expected.ARGBHex = "FF7F2700";
                 ClassicAssert.AreEqual(expected, (wb.GetSheet("customOrange") as XSSFSheet).TabColor);
             }
             finally
@@ -3094,6 +3242,45 @@ namespace TestCases.XSSF.UserModel
                 ClassicAssert.AreEqual(clonedSheet.RepeatingColumns.FirstColumn, sheet.RepeatingColumns.FirstColumn, "RepeatingColumns.FirstColumn are not equal");
                 ClassicAssert.AreEqual(clonedSheet.RepeatingColumns.LastColumn, sheet.RepeatingColumns.LastColumn, "RepeatingColumns.LastColumn are not equal");
 
+            }
+        }
+
+        [Test]
+        public void TestGetHeaderFooterProperties()
+        {
+            XSSFWorkbook wb = new XSSFWorkbook();
+            XSSFSheet sh = wb.CreateSheet() as XSSFSheet;
+
+            XSSFHeaderFooterProperties hfProp = sh.HeaderFooterProperties;
+            ClassicAssert.IsNotNull(hfProp);
+
+            wb.Close();
+        }
+
+        [Test]
+        public void TestGetCells_SingleCellRange_GetText()
+        {
+            var workbook = XSSFTestDataSamples.OpenSampleWorkbook("SampleSS.xlsx");
+            var sheet = workbook.GetSheetAt(1);
+            var cellRange = sheet.Cells["A6:D7"];
+            var texts=cellRange.Texts;
+            ClassicAssert.AreEqual(2, texts.Length);
+            ClassicAssert.AreEqual(4, texts[0].Length);
+
+            ClassicAssert.AreEqual("cb=1", texts[0][0]);
+            ClassicAssert.AreEqual("cb=10", texts[0][1]);
+            ClassicAssert.AreEqual("cb=2", texts[0][2]);
+            ClassicAssert.AreEqual("cb=sum", texts[0][3]);
+            ClassicAssert.AreEqual("1", texts[1][0]);
+            ClassicAssert.AreEqual("10", texts[1][1]);
+            ClassicAssert.AreEqual("2", texts[1][2]);
+            ClassicAssert.AreEqual("SUM(A7:C7)", texts[1][3]);
+
+            var texts2 = sheet.Cells["A5:D6"].Texts;
+            for(var i = 0; i<texts2[0].Length; i++)
+            {
+                ClassicAssert.IsNull(texts2[0][i]);
+                ClassicAssert.IsNotNull(texts2[1][i]);
             }
         }
     }

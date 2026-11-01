@@ -26,6 +26,7 @@ namespace NPOI.SS.UserModel
     using NPOI.SS.Util;
     using System.Collections;
     using NPOI.Util;
+    using System.Data;
 
     /// <summary>
     /// Indicate the position of the margin. One of left, right, top and bottom.
@@ -86,7 +87,6 @@ namespace NPOI.SS.UserModel
     /// </remarks>
     public interface ISheet : IEnumerable<IRow>
     {
-
         /// <summary>
         /// Create a new row within the sheet and return the high level representation
         /// </summary>
@@ -133,10 +133,10 @@ namespace NPOI.SS.UserModel
         bool ForceFormulaRecalculation { get; set; }
 
         /// <summary>
-        /// Get the visibility state for a given column
+        /// Set the visibility state for a given column
         /// </summary>
-        /// <param name="columnIndex">the column to get (0-based)</param>
-        /// <param name="hidden">the visiblity state of the column</param>
+        /// <param name="columnIndex">the column to set (0-based)</param>
+        /// <param name="hidden">the visibility state of the column</param>
         void SetColumnHidden(int columnIndex, bool hidden);
 
         /// <summary>
@@ -297,14 +297,8 @@ namespace NPOI.SS.UserModel
         /// Call <see cref="NPOI.SS.UserModel.IRow.RowNum"/> on each row 
         /// if you care which one it is.
         /// </returns>
+        [Obsolete("Use ISheet.GetEnumerator() instead")]
         IEnumerator GetRowEnumerator();
-
-
-        /// <summary>
-        /// Get the row enumerator
-        /// </summary>
-        /// <returns></returns>
-        IEnumerator GetEnumerator();
 
         /// <summary>
         /// Gets the flag indicating whether the window should show 0 (zero) in cells Containing zero value.
@@ -526,8 +520,8 @@ namespace NPOI.SS.UserModel
         /// </summary>
         /// <param name="colSplit">Horizonatal position of split</param>
         /// <param name="rowSplit">Vertical position of split</param>
-        /// <param name="leftmostColumn">Top row visible in bottom pane</param>
-        /// <param name="topRow">Left column visible in right pane</param>
+        /// <param name="leftmostColumn">Left column visible in right pane</param>
+        /// <param name="topRow">Top row visible in bottom pane</param>
         void CreateFreezePane(int colSplit, int rowSplit, int leftmostColumn, int topRow);
 
         /// <summary>
@@ -712,16 +706,25 @@ namespace NPOI.SS.UserModel
 
         /// <summary>
         /// Adjusts the column width to fit the contents.
-        /// </summary>
-        /// <param name="column">the column index.</param>
-        /// <param name="useMergedCells">whether to use the contents of merged cells when 
-        /// calculating the width of the column. Default is to ignore merged cells.</param>
-        /// <remarks>
         /// This process can be relatively slow on large sheets, so this should
         /// normally only be called once per column, at the end of your
-        /// processing.
-        /// </remarks>
-        void AutoSizeColumn(int column, bool useMergedCells);
+        /// Processing.
+        /// You can specify whether the content of merged cells should be considered or ignored.
+        /// Default is to ignore merged cells.
+        /// </summary>
+        /// <param name="column">the column index</param>
+        /// <param name="useMergedCells">whether to use the contents of merged cells when calculating the width of the column</param>
+        /// <param name="maxRows">limit the scope to maxRows rows to speed up the function, or leave 0 (optional)</param>
+        void AutoSizeColumn(int column, bool useMergedCells, int maxRows = 0);
+
+        /// <summary>
+        /// Adjusts the column width to fit the contents, sampling only the first <paramref name="maxRows"/> rows.
+        /// This is significantly faster than scanning the entire sheet on large datasets.
+        /// Merged cells are ignored. Use <see cref="AutoSizeColumn(int, bool, int)"/> to include them.
+        /// </summary>
+        /// <param name="column">the column index</param>
+        /// <param name="maxRows">maximum number of rows to sample (0 = all rows)</param>
+        void AutoSizeColumn(int column, int maxRows);
 
         /// <summary>
         /// Adjusts the row height to fit the contents.
@@ -937,7 +940,23 @@ namespace NPOI.SS.UserModel
         CellAddress ActiveCell { get; set; }
 
         void CopyTo(IWorkbook dest, string name, bool copyStyle, bool keepFormulas);
-        
-        CellRangeAddressList GetCells(string cellranges);
+
+        NCellRange Cells { get; }
+        NRowRange Rows { get; }
+
+        /// <summary>
+        /// Gets a cell or range of cells by address string (e.g., "A1" or "A1:C10")
+        /// </summary>
+        /// <param name="address">Cell address (e.g., "A1" or "A1:C10")</param>
+        /// <returns>NCellRange containing the specified cell(s)</returns>
+        NCellRange this[string address] { get; }
+
+        /// <summary>
+        ///  Convert a sheet to a DataTable. Note that merged cells are not supported
+        /// </summary>
+        /// <param name="firstRowAsHeader">whether first row is column header</param>
+        /// <param name="showCalculatedValue">whether to show evaluated value of a formula in the cell</param>
+        /// <returns></returns>
+        DataTable ToDataTable(bool firstRowAsHeader = false, bool showCalculatedValue = false);
     }
 }

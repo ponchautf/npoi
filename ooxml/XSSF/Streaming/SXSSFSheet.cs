@@ -16,18 +16,19 @@
 ==================================================================== */
 
 using NPOI.HSSF.Util;
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.IO;
-using System.Linq;
+using NPOI.OpenXmlFormats.Spreadsheet;
 using NPOI.SS;
 using NPOI.SS.UserModel;
 using NPOI.SS.Util;
 using NPOI.Util;
 using NPOI.XSSF.UserModel;
-using NPOI.OpenXmlFormats.Spreadsheet;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Data;
+using System.IO;
+using System.Linq;
 
 namespace NPOI.XSSF.Streaming
 {
@@ -40,7 +41,7 @@ namespace NPOI.XSSF.Streaming
         private readonly Dictionary<int, SXSSFRow> _rows = new Dictionary<int, SXSSFRow>();
         private readonly SheetDataWriter _writer;
         private int _randomAccessWindowSize = SXSSFWorkbook.DEFAULT_WINDOW_SIZE;
-        private readonly Lazy<AutoSizeColumnTracker> _autoSizeColumnTracker;
+        private AutoSizeColumnTracker _autoSizeColumnTracker;
         private int outlineLevelRow = 0;
         private int lastFlushedRowNumber = -1;
         private bool allFlushed = false;
@@ -55,8 +56,15 @@ namespace NPOI.XSSF.Streaming
             _sh = xSheet;
             _writer = workbook.CreateSheetDataWriter();
             SetRandomAccessWindowSize(_workbook.RandomAccessWindowSize);
-            _autoSizeColumnTracker = new Lazy<AutoSizeColumnTracker>(
-                () => new AutoSizeColumnTracker(this));
+        }
+
+        private AutoSizeColumnTracker GetOrCreateAutoSizeColumnTracker()
+        {
+            if (_autoSizeColumnTracker == null)
+            {
+                _autoSizeColumnTracker = new AutoSizeColumnTracker(this);
+            }
+            return _autoSizeColumnTracker;
         }
 
         public void SetRandomAccessWindowSize(int value)
@@ -535,6 +543,12 @@ namespace NPOI.XSSF.Streaming
             AutoSizeColumn(column, false);
         }
 
+        /// <inheritdoc />
+        public void AutoSizeColumn(int column, int maxRows)
+        {
+            AutoSizeColumn(column, false, maxRows);
+        }
+
         /**
          * Adjusts the column width to fit the contents.
          * <p>
@@ -557,7 +571,7 @@ namespace NPOI.XSSF.Streaming
          * @param column the column index to auto-size
          * @param useMergedCells whether to use the contents of merged cells when calculating the width of the column
          */
-        public void AutoSizeColumn(int column, bool useMergedCells)
+        public void AutoSizeColumn(int column, bool useMergedCells, int maxRows = 0)
         {
             // Multiple calls to autoSizeColumn need to look up the best-fit width
             // of rows already flushed to disk plus re-calculate the best-fit width
@@ -575,7 +589,7 @@ namespace NPOI.XSSF.Streaming
             try
             {
                 // get the best fit width of rows already flushed to disk
-                flushedWidth = _autoSizeColumnTracker.Value.GetBestFitColumnWidth(column, useMergedCells);
+                flushedWidth = GetOrCreateAutoSizeColumnTracker().GetBestFitColumnWidth(column, useMergedCells);
             }
             catch (Exception e)
             {
@@ -786,11 +800,6 @@ namespace NPOI.XSSF.Streaming
             return _sh.GetDataValidations();
         }
 
-        public IEnumerator GetEnumerator()
-        {
-            return (IEnumerator<IRow>)new SortedDictionary<int,SXSSFRow>(_rows).Values.GetEnumerator();
-        }
-
         public double GetMargin(MarginType margin)
         {
             return _sh.GetMargin(margin);
@@ -811,7 +820,7 @@ namespace NPOI.XSSF.Streaming
 
         public IEnumerator GetRowEnumerator()
         {
-            return GetEnumerator();
+            return _rows.GetEnumerator();
         }
 
         public void GroupColumn(int fromColumn, int toColumn)
@@ -1068,7 +1077,7 @@ namespace NPOI.XSSF.Streaming
          */
         public void TrackColumnForAutoSizing(int column)
         {
-            _autoSizeColumnTracker.Value.TrackColumn(column);
+            GetOrCreateAutoSizeColumnTracker().TrackColumn(column);
         }
 
         /**
@@ -1081,7 +1090,7 @@ namespace NPOI.XSSF.Streaming
          */
         public void TrackColumnsForAutoSizing(ICollection<int> columns)
         {
-            _autoSizeColumnTracker.Value.TrackColumns(columns);
+            GetOrCreateAutoSizeColumnTracker().TrackColumns(columns);
         }
 
         /**
@@ -1091,7 +1100,7 @@ namespace NPOI.XSSF.Streaming
          */
         public void TrackAllColumnsForAutoSizing()
         {
-            _autoSizeColumnTracker.Value.TrackAllColumns();
+            GetOrCreateAutoSizeColumnTracker().TrackAllColumns();
         }
 
         /**
@@ -1107,7 +1116,7 @@ namespace NPOI.XSSF.Streaming
          */
         public bool UntrackColumnForAutoSizing(int column)
         {
-            return _autoSizeColumnTracker.Value.UntrackColumn(column);
+            return GetOrCreateAutoSizeColumnTracker().UntrackColumn(column);
         }
 
         /**
@@ -1123,7 +1132,7 @@ namespace NPOI.XSSF.Streaming
          */
         public bool UntrackColumnsForAutoSizing(ICollection<int> columns)
         {
-            return _autoSizeColumnTracker.Value.UntrackColumns(columns);
+            return GetOrCreateAutoSizeColumnTracker().UntrackColumns(columns);
         }
 
         /**
@@ -1133,7 +1142,7 @@ namespace NPOI.XSSF.Streaming
          */
         public void UntrackAllColumnsForAutoSizing()
         {
-            _autoSizeColumnTracker.Value.UntrackAllColumns();
+            GetOrCreateAutoSizeColumnTracker().UntrackAllColumns();
         }
 
         /**
@@ -1145,7 +1154,7 @@ namespace NPOI.XSSF.Streaming
          */
         public bool IsColumnTrackedForAutoSizing(int column)
         {
-            return _autoSizeColumnTracker.Value.IsColumnTracked(column);
+            return GetOrCreateAutoSizeColumnTracker().IsColumnTracked(column);
         }
 
         /**
@@ -1160,7 +1169,7 @@ namespace NPOI.XSSF.Streaming
         {
             get
             {
-                return _autoSizeColumnTracker.Value.TrackedColumns;
+                return GetOrCreateAutoSizeColumnTracker().TrackedColumns;
             }
         }
 
@@ -1398,7 +1407,7 @@ namespace NPOI.XSSF.Streaming
             var firstRowNum = _rows.Keys.Min();
             // Update the best fit column widths for auto-sizing just before the rows are flushed
             var firstRow = _rows[firstRowNum];
-            _autoSizeColumnTracker.Value?.UpdateColumnWidths(firstRow);
+            _autoSizeColumnTracker?.UpdateColumnWidths(firstRow);
             _writer.WriteRow(firstRowNum, firstRow);
             _rows.Remove(firstRowNum);
             lastFlushedRowNumber = firstRowNum;
@@ -1446,6 +1455,7 @@ namespace NPOI.XSSF.Streaming
                 _sh.TabColor = value;
             }
         }
+
         public void CopyTo(IWorkbook dest, string name, bool copyStyle, bool keepFormulas)
         {
             throw new NotImplementedException();
@@ -1660,11 +1670,34 @@ namespace NPOI.XSSF.Streaming
 
         IEnumerator<IRow> IEnumerable<IRow>.GetEnumerator()
         {
-            return ((IEnumerable<IRow>) _sh).GetEnumerator();
+            return _rows.Values.GetEnumerator();
         }
-        public CellRangeAddressList GetCells(string cellranges)
+
+        public IEnumerator GetEnumerator()
         {
-            return CellRangeAddressList.Parse(cellranges);
+            return _rows.Values.GetEnumerator();
+        }
+
+        public NCellRange Cells
+        {
+            get
+            {
+                return new NCellRange(this, 0, 0, this.Workbook.SpreadsheetVersion.MaxRows, this.Workbook.SpreadsheetVersion.MaxColumns);
+            }
+        }
+
+        public NCellRange this[string address] => Cells[address];
+
+        public NRowRange Rows
+        {
+            get
+            {
+                return new NRowRange(this, 0, this.Workbook.SpreadsheetVersion.MaxRows);
+            }
+        }
+        public DataTable ToDataTable(bool firstRowAsHeader = false, bool showCalculatedValue = false)
+        {
+            return SheetUtil.ToDataTable(this, firstRowAsHeader, showCalculatedValue);
         }
     }
 }
